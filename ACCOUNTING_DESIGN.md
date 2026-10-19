@@ -1,0 +1,7 @@
+# Accounting design · unapproved local basis
+
+Each legal entity maintains integer minor-unit transactions in its functional currency. Local categories map to expense accounts; tax, assets, prepayments and cross-currency classification remain gated. An expense of N minor units posts Dr category expense / Cr reimbursement-vendor payable N; settlement posts Dr payable / Cr bank N. Both post atomically after exact statement matching in this initial slice. This cash-settlement timing is NOT approved accrual accounting; approval-time liability recognition and period accruals must precede production.
+
+Journal checks: authorized finance actor; approved_by present; at least two lines; exactly one positive integer side on each line; active entity accounts; open period; total debits = credits; safe aggregate. Atomic entity/year numbers and idempotency keys prevent retry duplication. Database posting transition independently checks balance, line count and open period. Posted header and line mutation is prohibited by triggers.
+
+Trial balance reports debit, credit and net by account. P&L reports seeded expenses and no revenue entries; balance sheet includes current result in equity. All posted entries belong to October in the local fixture; reports currently cover all posted entries rather than arbitrary date ranges. Cash flow, statutory mappings, adjusting/reversing journals, manual journal entry, period close/reopen and external-accountant review remain pending.

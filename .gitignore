@@ -1,0 +1,15 @@
+node_modules/
+.next/
+dist/
+data/*
+!data/.gitkeep
+.env
+*.tsbuildinfo
+.DS_Store
+.env.*
+!.env.example
+*.pem
+*.key
+*.db
+*.db-shm
+*.db-wal

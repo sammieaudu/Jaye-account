@@ -1,0 +1,20 @@
+# Optional local shadow environment. This does not deploy production infrastructure.
+services:
+  finance:
+    build: .
+    ports:
+      - '127.0.0.1:3000:3000'
+    # Both processes listen on loopback inside the same container.
+    # Published web port requires Next to listen on the container interface.
+    command: sh -c 'npm run start -w apps/api & npm exec -w apps/web -- next start --hostname 0.0.0.0 --port 3000'
+    environment:
+      JAYE_MODE: local-shadow
+    volumes:
+      - finance-local-data:/app/data
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3001/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+volumes:
+  finance-local-data:
