@@ -3643,3 +3643,6 @@ footer {
 .sidebar .advanced-toggle[aria-expanded="true"] > svg:last-child {
   transform: rotate(180deg);
 }
+
+.hosted-sign-in { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 24px; text-align: center; }
+.hosted-user { position: fixed; bottom: 26px; right: 26px; z-index: 80; }

@@ -18,12 +18,12 @@ All policies below are **unapproved**. Sample configuration exists only for synt
 | IP / intercompany | No charging or elimination feature | Counsel signs agreements; CPAs approve transfer pricing |
 | Revenue / ₦30 levy | Disabled; no rider fare assumptions | Accountant/counsel approve recognition, principal/agent and levy policy |
 | Payroll | Employee directory, agreed salary records, payments and corrections implemented; statutory calculations disabled | Payroll adviser approves rules and exact golden datasets |
-| Production identity | Local identity selector only | Security owner supplies SSO + enforced MFA and entity-scoped claims |
-| PostgreSQL | Local SQLite only | Engineer ports migrations/transactions, adds restricted app role and concurrency tests |
+| Production identity | Clerk verified-owner sign-in and authenticated gateway implemented; local identity disabled in hosted mode | Provision Clerk, verify owner access; extend staff roles and enforce MFA before broader access |
+| Database hosting | SQLite on a single Railway instance with persistent volume; deployment pending | Verify volume backups/restore; migrate to PostgreSQL before horizontal scaling |
 | Evidence | Local AES-GCM encryption and MIME signature validation | Security owner integrates scanner, object storage, retention and managed keys |
 | Personal-data region / NDPA | Real PII excluded | Counsel approves data classes, locations and transfer basis |
 | Investor snapshots | Empty approved-only workspace | CFO approves frozen snapshots after consolidation implementation |
 | Provider integrations | No live provider connected | Provider sandbox tests + separate authorization for real disbursement |
-| Go-live | Prohibited; API refuses production mode | CFO after parallel runs, auditor walkthrough and recovery rehearsal |
+| Go-live | Hosted mode requires persistent storage and an authenticated gateway; deployment verification pending | Complete hosted access, persistence and restore checks |
 
 Staging cannot be treated as authorized by this local build. Its environment, region, budget and access must be agreed separately. Do not add tax identifiers, EINs, credentials or bank details to this file.

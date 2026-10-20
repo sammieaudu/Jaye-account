@@ -13,3 +13,6 @@ data/*
 *.db
 *.db-shm
 *.db-wal
+
+.vercel/
+.vercel

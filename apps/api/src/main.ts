@@ -1,3 +1,4 @@
+import { hostedMode, validateHosting, validServiceKey } from "./hosted";
 import { BookkeepingService } from "./bookkeeping";
 import { RecoveryService } from "./recoveries";
 import { AdjustmentService } from "./adjustments";
@@ -62,20 +63,27 @@ class Errors implements ExceptionFilter {
 class Api {
   constructor(@Inject(STORE) private readonly store: FinanceStore) {}
   actor(req: Request) {
+    if (hostedMode()) {
+      if (!validServiceKey(req.headers["x-jaye-service-key"]))
+        throw new DomainError("Authenticated gateway required", 401);
+      return this.store.actor("finance");
+    }
     return this.store.session(token(req));
   }
   @Get("health") health() {
     return {
       status: "ok",
-      mode: "local-shadow",
+      mode: hostedMode() ? "hosted" : "local-shadow",
       data: "workspace",
       productionReady: false,
     };
   }
   @Get("demo/users") users() {
+    if (hostedMode()) throw new DomainError("Local sign-in is disabled", 403);
     return this.store.users();
   }
   @Post("demo/login") login(@Body() input: any, @Res() res: Response) {
+    if (hostedMode()) throw new DomainError("Local sign-in is disabled", 403);
     const { token, user } = this.store.login(input.user_id);
     res.cookie("jaye_session", token, {
       httpOnly: true,
@@ -596,13 +604,7 @@ class Api {
 @Module({ controllers: [Api] })
 class AppModule {}
 export async function createFinanceApp(store?: FinanceStore) {
-  if (
-    process.env.NODE_ENV === "production" ||
-    process.env.JAYE_MODE === "production"
-  )
-    throw new Error(
-      "Local shadow build cannot run as production. Complete the controls in OPEN_DECISIONS.md first.",
-    );
+  validateHosting();
   const app = await NestFactory.create(
     {
       module: AppModule,
@@ -628,6 +630,22 @@ export async function createFinanceApp(store?: FinanceStore) {
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     });
+    if (hostedMode()) {
+      if (req.path === "/api/health" && req.method === "GET") {
+        next();
+        return;
+      }
+      if (!validServiceKey(req.headers["x-jaye-service-key"])) {
+        res.status(401).json({ message: "Authenticated gateway required" });
+        return;
+      }
+      if (req.path.startsWith("/api/demo/")) {
+        res.status(403).json({ message: "Local sign-in is disabled" });
+        return;
+      }
+      next();
+      return;
+    }
     const origin = req.headers.origin;
     if (
       req.method !== "GET" &&
@@ -644,9 +662,14 @@ export async function createFinanceApp(store?: FinanceStore) {
 }
 async function bootstrap() {
   const app = await createFinanceApp();
-  await app.listen(3001, "127.0.0.1");
+  await app.listen(
+    Number(process.env.PORT || 3001),
+    hostedMode() ? "0.0.0.0" : "127.0.0.1",
+  );
   console.log(
-    "Jaye Finance API: http://127.0.0.1:3001/api/health · LOCAL WORKSPACE",
+    hostedMode()
+      ? "Jaye Finance API: authenticated hosted workspace"
+      : "Jaye Finance API: http://127.0.0.1:3001/api/health · LOCAL WORKSPACE",
   );
 }
 if (require.main === module) bootstrap();
