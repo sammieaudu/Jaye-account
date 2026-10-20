@@ -57,3 +57,12 @@ The release through commit `54b1b6c` is now deployed:
 - Backend health and authenticated category/invoice list endpoints returned HTTP 200. Anonymous requests to both backend and Vercel category/invoice endpoints returned HTTP 401.
 - No database, receipts or encryption key were replaced. No live test records have been created in this release verification.
 - Live browser verification is pending user sign-in. The in-app browser live tab was signed out. Do not redeploy this release merely because the monitoring automation runs again; resume browser checks after sign-in. Receipt attachment/OCR, category creation/reuse, invoice PDF export, persistence and cleanup remain to verify live.
+
+### Live browser verification completed
+
+Verified in the signed-in Chrome session on the production alias:
+- PNG OCR extracted supplier, date, receipt reference and NGN 1,000 total. Saved one expense and its attachment, reloaded and reopened it, then downloaded the attachment; its bytes matched the source file.
+- Created Office supplies category, reloaded and reused it in the expense correction form. Found a race where submitting the parent form during category creation retained the previous category; added native validation requiring category save/cancel before the record can submit. Verified this validation on production. Vercel follow-up release `jaye-finance-o3wv4718b-manoahumukoros-projects.vercel.app` is READY.
+- Saved JAYE-00001 for a clearly labelled QA customer, two items at NGN 1,500 each, total NGN 3,000. Reopened after reload and exported a one-page PDF with the expected customer and total.
+- Voided the test expense and cancelled the test invoice. Dashboard and expense totals returned to NGN 0; customer invoices did not add expense costs. Existing records were not altered. Office supplies remains as a reusable category, and test audit history is retained.
+- TypeScript and Vercel production build passed. Browser export and save/persistence checks passed; device-specific native sharing was not exercised.

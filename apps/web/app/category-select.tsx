@@ -81,7 +81,7 @@ export default function CategorySelect({
         aria-label="Category"
         name={name}
         value={value ?? selected}
-        disabled={disabled}
+        disabled={disabled || busy}
         onChange={(e) => {
           if (e.target.value === "__add") {
             setAdding(true);
@@ -101,6 +101,9 @@ export default function CategorySelect({
       {adding && (
         <span className="category-create">
           <input
+            ref={(input) => {
+              input?.setCustomValidity("Save or cancel the new category before saving this record.");
+            }}
             aria-label="New category name"
             placeholder="New category name"
             maxLength={60}
@@ -129,6 +132,7 @@ export default function CategorySelect({
             <button
               type="button"
               className="button"
+              disabled={busy}
               onClick={() => setAdding(false)}
             >
               Cancel
