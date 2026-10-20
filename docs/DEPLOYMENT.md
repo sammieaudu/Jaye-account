@@ -48,3 +48,12 @@ The next release adds `/api/categories` and `/api/sales-invoices` endpoints and 
 Validation: 112 automated tests passed; TypeScript and production builds passed. Browser checks verified image OCR suggestions, category creation, expense creation with its receipt attached, and branded invoice PDF export. The local test expense was voided to zero and the sample invoice cancelled; no live financial records were changed.
 
 Receipt capture supports JPG/PNG OCR with review before saving; PDFs are attachment-only. New categories map to an existing accounting group. Customer invoices are numbered documents with draft/issued/cancelled states; they do not post revenue or record customer payments. Sharing uses the device share menu when supported, with PDF download as fallback. Invoice company details default to the contact details supplied by the user; bank instructions remain editable and blank by default.
+
+### Release deployed; browser verification pending
+
+The release through commit `54b1b6c` is now deployed:
+- Railway: `83608554-73e6-4a24-9c40-55972f0fea97` — SUCCESS.
+- Vercel: `dpl_EgM2dHZeU3ivdNmztHYDU1NbEnFP` — READY, aliased to https://jaye-finance.vercel.app.
+- Backend health and authenticated category/invoice list endpoints returned HTTP 200. Anonymous requests to both backend and Vercel category/invoice endpoints returned HTTP 401.
+- No database, receipts or encryption key were replaced. No live test records have been created in this release verification.
+- Live browser verification is pending user sign-in. The in-app browser live tab was signed out. Do not redeploy this release merely because the monitoring automation runs again; resume browser checks after sign-in. Receipt attachment/OCR, category creation/reuse, invoice PDF export, persistence and cleanup remain to verify live.
