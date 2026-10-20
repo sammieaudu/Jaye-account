@@ -1,5 +1,5 @@
 import { currentUser } from "@clerk/nextjs/server";
-import { isWorkspaceOwner } from "../../../lib/hosted-access";
+import { canAccessWorkspace } from "../../../lib/hosted-access";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 async function proxy(
@@ -15,10 +15,10 @@ async function proxy(
     return Response.json({ message: "Invalid path" }, { status: 400 });
   const headers = new Headers();
   if (hosted) {
-    if (!isWorkspaceOwner(await currentUser(), process.env.JAYE_OWNER_EMAIL))
+    if (!canAccessWorkspace(await currentUser()))
       return Response.json(
-        { message: "Sign in with the workspace owner account." },
-        { status: 403 },
+        { message: "Sign in to access the workspace." },
+        { status: 401 },
       );
     if (route === "demo/users") return Response.json([]);
     if (route.startsWith("demo/"))

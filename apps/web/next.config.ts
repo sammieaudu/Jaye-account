@@ -3,7 +3,6 @@ if (process.env.VERCEL === "1") {
   const required = [
     "JAYE_API_URL",
     "JAYE_API_SECRET",
-    "JAYE_OWNER_EMAIL",
     "JAYE_APP_ORIGIN",
     "CLERK_SECRET_KEY",
     "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",

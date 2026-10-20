@@ -1,18 +1,5 @@
-export function isWorkspaceOwner(
-  user: {
-    emailAddresses: Array<{
-      emailAddress: string;
-      verification: { status: string } | null;
-    }>;
-  } | null,
-  ownerEmail?: string,
-): boolean {
-  return (
-    !!ownerEmail &&
-    !!user?.emailAddresses.some(
-      (email) =>
-        email.verification?.status === "verified" &&
-        email.emailAddress.toLowerCase() === ownerEmail.trim().toLowerCase(),
-    )
-  );
+// Hosted access is shared: every authenticated Clerk user has the same access.
+// Only pass the user returned by Clerk's server-side currentUser().
+export function canAccessWorkspace(user: { id: string } | null): boolean {
+  return Boolean(user?.id);
 }

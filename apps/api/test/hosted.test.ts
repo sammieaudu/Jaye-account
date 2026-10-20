@@ -7,42 +7,13 @@ import { randomBytes } from "node:crypto";
 import { FinanceStore } from "../src/domain";
 import { createFinanceApp } from "../src/main";
 import { validateHosting } from "../src/hosted";
-import { isWorkspaceOwner } from "../../web/lib/hosted-access";
+import { canAccessWorkspace } from "../../web/lib/hosted-access";
 
-test("hosted owner access requires an exact verified email and configured allowlist", () => {
-  const user = (emailAddress: string, status: string) => ({
-    emailAddresses: [{ emailAddress, verification: { status } }],
-  });
-  assert.equal(
-    isWorkspaceOwner(
-      user("OWNER@example.com", "verified"),
-      "owner@example.com",
-    ),
-    true,
-  );
-  assert.equal(
-    isWorkspaceOwner(
-      user("owner@example.com", "unverified"),
-      "owner@example.com",
-    ),
-    false,
-  );
-  assert.equal(
-    isWorkspaceOwner(
-      user("other@example.com", "verified"),
-      "owner@example.com",
-    ),
-    false,
-  );
-  assert.equal(
-    isWorkspaceOwner(
-      user("owner@example.com.evil.test", "verified"),
-      "owner@example.com",
-    ),
-    false,
-  );
-  assert.equal(isWorkspaceOwner(null, "owner@example.com"), false);
-  assert.equal(isWorkspaceOwner(user("owner@example.com", "verified")), false);
+test("hosted workspace permits every authenticated user and denies signed-out access", () => {
+  assert.equal(canAccessWorkspace({ id: "user_owner" }), true);
+  assert.equal(canAccessWorkspace({ id: "user_external" }), true);
+  assert.equal(canAccessWorkspace(null), false);
+  assert.equal(canAccessWorkspace({ id: "" }), false);
 });
 test("hosted backend denies anonymous and local identity access, and preserves data across restart", async (t) => {
   const original = {
