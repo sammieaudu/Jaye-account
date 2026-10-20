@@ -556,7 +556,7 @@ export class ReportingService {
           lines: [
             { account: "1100", debit: r.amount_minor, credit: 0 },
             {
-              account: categories[expense.category],
+              account: s.categoryAccount(expense.entity_id, expense.category),
               debit: 0,
               credit: r.amount_minor,
             },

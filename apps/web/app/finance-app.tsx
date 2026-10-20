@@ -1,5 +1,7 @@
 "use client";
 import Select from "./select";
+import CategorySelect from "./category-select";
+import Invoices from "./invoices";
 import Bookkeeping from "./bookkeeping";
 import Recoveries from "./recoveries";
 import Reimbursements from "./reimbursements";
@@ -71,6 +73,10 @@ const menuGroups = [
       { label: "Reimbursements", icon: Wallet },
       { label: "Recoveries", icon: ArrowDownLeft },
     ],
+  },
+  {
+    title: "Customer invoices",
+    items: [{ label: "Invoices", icon: FileText }],
   },
   {
     title: "Planning & reports",
@@ -759,27 +765,80 @@ export default function Home() {
         </header>
         <main>
           {showGuide && (
-            <section id="workspace-quick-guide" className="workspace-quick-guide" aria-label="Quick guide">
+            <section
+              id="workspace-quick-guide"
+              className="workspace-quick-guide"
+              aria-label="Quick guide"
+            >
               <div className="quick-guide-heading">
-                <div><h2>Start with what you want to record</h2><p>Record the cost once. Add payments and refunds to that same record.</p></div>
-                <button className="button" onClick={() => setShowGuide(false)}>Close guide</button>
+                <div>
+                  <h2>Start with what you want to record</h2>
+                  <p>
+                    Record the cost once. Add payments and refunds to that same
+                    record.
+                  </p>
+                </div>
+                <button className="button" onClick={() => setShowGuide(false)}>
+                  Close guide
+                </button>
               </div>
               <div className="quick-guide-grid">
                 {[
-                  { page: "Expenses", title: "1. Expenses & bills", text: "Anything Jaye buys: internet, equipment, transport or services. An unpaid bill is simply an expense you still owe." },
-                  { page: "Subscriptions", title: "2. Subscriptions", text: "Recurring services such as Figma or hosting. Add the service and billing dates, then use Record bill / payment to create its expense." },
-                  { page: "Employees", title: "3. Employees", text: "Add each person, their department and agreed salary. Staff IDs are generated automatically. This does not create a login account." },
-                  { page: "Payroll", title: "4. Salary records", text: "Choose an employee and salary month. Record the salary once, then add full or partial payments. The remaining amount stays visible." },
-                  { page: "Vendors", title: "5. Suppliers", text: "The businesses or people you buy from. Save regular suppliers here so you can choose them again when entering expenses." },
-                  { page: "Reports", title: "6. Reports", text: "See recorded costs, money paid and what is still owed. Refunds reduce costs; payments do not create a second expense." },
+                  {
+                    page: "Expenses",
+                    title: "1. Expenses & bills",
+                    text: "Anything Jaye buys: internet, equipment, transport or services. An unpaid bill is simply an expense you still owe.",
+                  },
+                  {
+                    page: "Subscriptions",
+                    title: "2. Subscriptions",
+                    text: "Recurring services such as Figma or hosting. Add the service and billing dates, then use Record bill / payment to create its expense.",
+                  },
+                  {
+                    page: "Employees",
+                    title: "3. Employees",
+                    text: "Add each person, their department and agreed salary. Staff IDs are generated automatically. This does not create a login account.",
+                  },
+                  {
+                    page: "Payroll",
+                    title: "4. Salary records",
+                    text: "Choose an employee and salary month. Record the salary once, then add full or partial payments. The remaining amount stays visible.",
+                  },
+                  {
+                    page: "Vendors",
+                    title: "5. Suppliers",
+                    text: "The businesses or people you buy from. Save regular suppliers here so you can choose them again when entering expenses.",
+                  },
+                  {
+                    page: "Reports",
+                    title: "6. Reports",
+                    text: "See recorded costs, money paid and what is still owed. Refunds reduce costs; payments do not create a second expense.",
+                  },
                 ].map((item) => (
-                  <button key={item.page} className="quick-guide-item" onClick={() => { navigate(item.page); setShowGuide(false); }}>
-                    <strong>{item.title}</strong><span>{item.text}</span><span className="quick-guide-link">Open section →</span>
+                  <button
+                    key={item.page}
+                    className="quick-guide-item"
+                    onClick={() => {
+                      navigate(item.page);
+                      setShowGuide(false);
+                    }}
+                  >
+                    <strong>{item.title}</strong>
+                    <span>{item.text}</span>
+                    <span className="quick-guide-link">Open section →</span>
                   </button>
                 ))}
               </div>
-              <p><strong>Made a mistake?</strong> Open the record and choose Correct record or Correct payment. Use Record refund only when money was actually returned to Jaye.</p>
-              <p><strong>For your demo:</strong> start with Expenses → Subscriptions → Employees → Payroll → Reports. These screens document money already spent or owed; they do not send payments.</p>
+              <p>
+                <strong>Made a mistake?</strong> Open the record and choose
+                Correct record or Correct payment. Use Record refund only when
+                money was actually returned to Jaye.
+              </p>
+              <p>
+                <strong>For your demo:</strong> start with Expenses →
+                Subscriptions → Employees → Payroll → Reports. These screens
+                document money already spent or owed; they do not send payments.
+              </p>
             </section>
           )}
           {registerDetail && (
@@ -1073,35 +1132,37 @@ export default function Home() {
                 <p>
                   {page === "Overview"
                     ? "Track spend, stay in control, and keep every naira accounted for."
-                    : page === "Expenses"
-                      ? "Record purchases, unpaid bills and payments in one place."
-                      : page === "Employees"
-                        ? "Keep employee details and agreed salaries up to date."
-                        : page === "Payroll"
-                          ? "Document monthly salaries, payments and the amount still owed."
-                          : page === "Recoveries"
-                            ? "Track repayments to Jaye, match bank credits, and clear recovery balances."
-                            : page === "Subscriptions"
-                              ? "Track recurring costs, departments and renewal dates."
-                              : page === "Reimbursements"
-                                ? "Group personal expenses, repay in stages, and see what each person is owed."
-                                : page === "Spend"
-                                  ? "From the first request to the final journal. All in one place."
-                                  : page === "Approvals"
-                                    ? "Review the evidence. Make a decision. Keep things moving."
-                                    : page === "Budgets"
-                                      ? "Plan with intention. See what’s spent, committed, and still available."
-                                      : page === "Payments"
-                                        ? "Approved spend, confirmed payments, and a clear paper trail."
-                                        : page === "General ledger"
-                                          ? "Balanced entries. Immutable records. A dependable foundation."
-                                          : page === "Reports"
-                                            ? "Outstanding balances, recurring forecasts, refunds and posted financial statements."
-                                            : page === "Audit trail"
-                                              ? "A complete, tamper-evident history of every financial action."
-                                              : page === "Vendors"
-                                                ? "Save the suppliers you buy from, then reuse their names when recording expenses."
-                                                : "Transparency, with the right controls."}
+                    : page === "Invoices"
+                      ? "Create branded customer invoices, export a PDF and share it."
+                      : page === "Expenses"
+                        ? "Record purchases, unpaid bills and payments in one place."
+                        : page === "Employees"
+                          ? "Keep employee details and agreed salaries up to date."
+                          : page === "Payroll"
+                            ? "Document monthly salaries, payments and the amount still owed."
+                            : page === "Recoveries"
+                              ? "Track repayments to Jaye, match bank credits, and clear recovery balances."
+                              : page === "Subscriptions"
+                                ? "Track recurring costs, departments and renewal dates."
+                                : page === "Reimbursements"
+                                  ? "Group personal expenses, repay in stages, and see what each person is owed."
+                                  : page === "Spend"
+                                    ? "From the first request to the final journal. All in one place."
+                                    : page === "Approvals"
+                                      ? "Review the evidence. Make a decision. Keep things moving."
+                                      : page === "Budgets"
+                                        ? "Plan with intention. See what’s spent, committed, and still available."
+                                        : page === "Payments"
+                                          ? "Approved spend, confirmed payments, and a clear paper trail."
+                                          : page === "General ledger"
+                                            ? "Balanced entries. Immutable records. A dependable foundation."
+                                            : page === "Reports"
+                                              ? "Outstanding balances, recurring forecasts, refunds and posted financial statements."
+                                              : page === "Audit trail"
+                                                ? "A complete, tamper-evident history of every financial action."
+                                                : page === "Vendors"
+                                                  ? "Save the suppliers you buy from, then reuse their names when recording expenses."
+                                                  : "Transparency, with the right controls."}
                 </p>
               </div>
               {canCreate &&
@@ -1949,6 +2010,9 @@ export default function Home() {
                       entityName={current?.name || entity}
                     />
                   )}
+                  {page === "Invoices" && (
+                    <Invoices entity={entity} request={api} />
+                  )}
                   {page === "Settings" && <SettingsControls />}
                 </>
               )
@@ -2523,15 +2587,11 @@ function SpendForm({
         </label>
         <label>
           Category
-          <Select
-            name="category"
+          <CategorySelect
+            entity={entity}
             defaultValue={initial?.category || parent?.category || "Operations"}
             disabled={!!savedId}
-          >
-            {cats.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </Select>
+          />
         </label>
       </div>
       {kind !== "request" && (
@@ -2757,11 +2817,7 @@ function VendorForm({
       </label>
       <label>
         Category
-        <Select name="category">
-          {cats.map((c) => (
-            <option key={c}>{c}</option>
-          ))}
-        </Select>
+        <CategorySelect entity={entity} />
       </label>
       <label className="checkbox-label">
         <input type="checkbox" name="related_party" />

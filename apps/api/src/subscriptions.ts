@@ -53,14 +53,7 @@ const subscriptionInput = z
       "Operations",
       "Finance",
     ]),
-    category: z.enum([
-      "Cloud & software",
-      "Marketing",
-      "Operations",
-      "Professional fees",
-      "Travel",
-      "Government fees",
-    ]),
+    category: z.string().trim().min(1).max(60),
     currency: z.enum(["NGN", "USD"]),
     amount_minor: money,
     cadence: z.enum(["monthly", "annual", "custom_days"]),
@@ -320,6 +313,7 @@ export class SubscriptionService {
           "Subscription changed. Reopen it before saving.",
           409,
         );
+      this.store.categoryAccount(v.entity_id, v.category);
       if (old?.status === "cancelled")
         throw new DomainError(
           "Cancelled subscriptions are read-only; create a new subscription to restart",

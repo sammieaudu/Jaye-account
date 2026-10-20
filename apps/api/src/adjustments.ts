@@ -189,7 +189,7 @@ export class AdjustmentService {
           approved_by: e.finance_id,
           lines: [
             {
-              account: categories[e.category],
+              account: s.categoryAccount(e.entity_id, e.category),
               debit: e.amount_minor,
               credit: 0,
             },
@@ -207,7 +207,7 @@ export class AdjustmentService {
         if (recovery > 0)
           lines.push({ account: "1200", debit: recovery, credit: 0 });
         lines.push({
-          account: categories[e.category],
+          account: s.categoryAccount(e.entity_id, e.category),
           debit: 0,
           credit: r.amount_minor,
         });

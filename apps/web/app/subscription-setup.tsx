@@ -1,6 +1,7 @@
 "use client";
 import { useState, type FormEvent } from "react";
 import Select from "./select";
+import CategorySelect from "./category-select";
 type Row = Record<string, any>;
 const departments = ["Product", "Marketing", "Operations", "Finance"];
 const groups = [
@@ -64,14 +65,8 @@ export default function SubscriptionSetup({
         users_count: get("users_count") ? Number(get("users_count")) : null,
         department,
         employee_id: employee,
-        category:
-          category === "new"
-            ? get("accounting_category")
-            : custom
-              ? custom.accounting_category
-              : category,
-        category_name:
-          category === "new" ? get("category_name") : custom?.name || "",
+        category: category.startsWith("custom:") ? category.slice(7) : category,
+        category_name: "",
         amount_minor,
         cadence,
         interval_count:
@@ -151,62 +146,12 @@ export default function SubscriptionSetup({
             *
           </span>
         </span>
-        <Select
-          required
-          value={category}
+        <CategorySelect
+          entity={value.entity_id}
+          value={category.startsWith("custom:") ? category.slice(7) : category}
           onChange={(e) => setCategory(e.target.value)}
-        >
-          {groups.map((g) => (
-            <option key={g}>{g}</option>
-          ))}
-          {categories.map((c) => (
-            <option key={c.id} value={`custom:${c.name}`}>
-              {c.name}
-            </option>
-          ))}
-          <option value="new">+ Add category</option>
-        </Select>
+        />
       </label>
-      {category === "new" && (
-        <div className="form-row">
-          <label>
-            <span className="required-field-label">
-              New category name{" "}
-              <span className="required-asterisk" aria-hidden="true">
-                *
-              </span>
-            </span>
-            <input
-              name="category_name"
-              required
-              maxLength={80}
-              placeholder="e.g. Design tools"
-            />
-            <small>Saved for use on other subscriptions.</small>
-          </label>
-          <label>
-            <span className="required-field-label">
-              Accounting group{" "}
-              <span className="required-asterisk" aria-hidden="true">
-                *
-              </span>
-            </span>
-            <Select
-              required
-              name="accounting_category"
-              defaultValue="Cloud & software"
-            >
-              {groups.map((g) => (
-                <option key={g}>{g}</option>
-              ))}
-            </Select>
-            <small>
-              Where these costs appear in expense reports. Software services
-              usually belong to Cloud & software.
-            </small>
-          </label>
-        </div>
-      )}
       <h3>Cost and billing</h3>
       <div className="form-row">
         <label>

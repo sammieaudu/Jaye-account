@@ -9,6 +9,8 @@ import {
   Wallet,
 } from "lucide-react";
 import Select from "./select";
+import CategorySelect from "./category-select";
+import ReceiptCapture from "./receipt-capture";
 import Correction from "./correction";
 import RecordSettlement from "./record-settlement";
 type Row = Record<string, any>;
@@ -110,6 +112,7 @@ export default function Bookkeeping({
     };
   }, [entity, request]);
   const submitKey = useRef("");
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const canWrite = user.role === "finance",
     team = page === "Employees",
     payroll = page === "Payroll";
@@ -171,6 +174,7 @@ export default function Bookkeeping({
     };
   }, [initialRecordId, request]);
   function start(employee?: Row) {
+    setReceiptFile(null);
     setError("");
     setNotice("");
     setEdit(employee || null);
@@ -262,6 +266,25 @@ export default function Bookkeeping({
         setNotice(
           "Record saved. The cost is counted once; payments only reduce the balance owed.",
         );
+        if (receiptFile) {
+          try {
+            const upload = new FormData();
+            upload.append("file", receiptFile);
+            await request(`/records/${saved.id}/attachments`, {
+              method: "POST",
+              body: upload,
+            });
+            setDetail(await request(`/records/${saved.id}`));
+            setReceiptFile(null);
+            setNotice(
+              "Expense saved with its receipt. The cost is counted once.",
+            );
+          } catch {
+            setError(
+              "The expense was saved, but its receipt could not be attached. Use Attach a document below to retry; do not record the expense again.",
+            );
+          }
+        }
       }
       await reload();
     } catch (e) {
@@ -649,6 +672,7 @@ export default function Bookkeeping({
             </button>
           </div>
           <form className="simple-form" onSubmit={save}>
+            {!team && !payroll && <ReceiptCapture onFile={setReceiptFile} />}
             {!team &&
               (payroll || personal === "person") &&
               !employees.some((e) => e.active) && (
@@ -815,11 +839,7 @@ export default function Bookkeeping({
                     </label>
                     <label>
                       Category
-                      <Select name="category">
-                        {categories.map((c) => (
-                          <option key={c}>{c}</option>
-                        ))}
-                      </Select>
+                      <CategorySelect entity={entity} />
                     </label>
                     <label>
                       Department

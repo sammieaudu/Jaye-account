@@ -109,3 +109,14 @@ CREATE TABLE IF NOT EXISTS bookkeeping_refunds(id TEXT PRIMARY KEY,record_id TEX
 CREATE TABLE IF NOT EXISTS bookkeeping_bank_matches(bank_transaction_id TEXT PRIMARY KEY REFERENCES bank_transactions(id),payment_id TEXT UNIQUE REFERENCES bookkeeping_payments(id),refund_id TEXT UNIQUE REFERENCES bookkeeping_refunds(id),matched_by TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,CHECK((payment_id IS NOT NULL)+(refund_id IS NOT NULL)=1));
 CREATE TRIGGER IF NOT EXISTS bookkeeping_refund_no_delete BEFORE DELETE ON bookkeeping_refunds BEGIN SELECT RAISE(ABORT,'Refund history cannot be deleted'); END;
 CREATE TRIGGER IF NOT EXISTS bookkeeping_refund_no_rewrite BEFORE UPDATE ON bookkeeping_refunds WHEN NEW.id<>OLD.id OR NEW.record_id<>OLD.record_id OR NEW.entity_id<>OLD.entity_id OR NEW.amount_minor<>OLD.amount_minor OR NEW.date<>OLD.date OR NEW.reference<>OLD.reference OR NEW.method<>OLD.method OR NEW.reason<>OLD.reason OR NEW.request_key<>OLD.request_key OR OLD.voided=1 OR NEW.voided<>1 BEGIN SELECT RAISE(ABORT,'Refunds can only be reversed, not rewritten'); END;
+
+CREATE TABLE IF NOT EXISTS workspace_categories (
+ entity_id TEXT NOT NULL REFERENCES entities(id), name TEXT NOT NULL COLLATE NOCASE,
+ accounting_category TEXT NOT NULL, PRIMARY KEY(entity_id,name)
+);
+CREATE TABLE IF NOT EXISTS sales_invoices (
+ id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id), number TEXT NOT NULL,
+ request_key TEXT UNIQUE NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
+ document TEXT NOT NULL, total_minor INTEGER NOT NULL, created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL, UNIQUE(entity_id,number)
+);

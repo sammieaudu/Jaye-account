@@ -40,3 +40,11 @@ Never prefix the gateway secret or Clerk secret with `NEXT_PUBLIC_`. Never commi
 7. Check backups and restore before importing existing records.
 
 Vercel functions impose a request body limit; large attachments may need direct object-storage uploads in a later release. This remains a management-recordkeeping system: it does not calculate statutory payroll deductions or send bank payments.
+
+## Receipt capture, categories and invoices — 20 October 2026
+
+The next release adds `/api/categories` and `/api/sales-invoices` endpoints and additive SQLite tables. Deploy the API before the web app. Railway rejected this release upload with “Deploys have been paused temporarily”; the official status page confirmed a build outage. The existing live frontend was left unchanged. Resume backend deployment, verify its health and new authenticated endpoints, then deploy Vercel.
+
+Validation: 112 automated tests passed; TypeScript and production builds passed. Browser checks verified image OCR suggestions, category creation, expense creation with its receipt attached, and branded invoice PDF export. The local test expense was voided to zero and the sample invoice cancelled; no live financial records were changed.
+
+Receipt capture supports JPG/PNG OCR with review before saving; PDFs are attachment-only. New categories map to an existing accounting group. Customer invoices are numbered documents with draft/issued/cancelled states; they do not post revenue or record customer payments. Sharing uses the device share menu when supported, with PDF download as fallback. Invoice company details default to the contact details supplied by the user; bank instructions remain editable and blank by default.

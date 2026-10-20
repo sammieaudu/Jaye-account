@@ -1,3 +1,4 @@
+import { InvoiceService } from "./invoices";
 import { hostedMode, validateHosting, validServiceKey } from "./hosted";
 import { BookkeepingService } from "./bookkeeping";
 import { RecoveryService } from "./recoveries";
@@ -102,6 +103,41 @@ class Api {
   }
   @Get("entities") entities(@Req() req: Request) {
     return this.store.entities(this.actor(req));
+  }
+  @Get("sales-invoices") salesInvoices(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+  ) {
+    return new InvoiceService(this.store).list(this.actor(req), entity);
+  }
+  @Post("sales-invoices") saveSalesInvoice(
+    @Req() req: Request,
+    @Body() input: any,
+  ) {
+    return new InvoiceService(this.store).save(this.actor(req), input);
+  }
+  @Post("sales-invoices/:id/edit") editSalesInvoice(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new InvoiceService(this.store).save(this.actor(req), input, id);
+  }
+  @Post("sales-invoices/:id/action") actionSalesInvoice(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new InvoiceService(this.store).action(this.actor(req), id, input);
+  }
+  @Get("categories") categories(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+  ) {
+    return this.store.categoryList(this.actor(req), entity);
+  }
+  @Post("categories") addCategory(@Req() req: Request, @Body() input: any) {
+    return this.store.addCategory(this.actor(req), input);
   }
   @Get("dashboard") dashboard(
     @Req() req: Request,

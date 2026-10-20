@@ -110,15 +110,7 @@ const spendInput = z
       "Operations",
       "Finance",
     ]),
-    category: z.enum([
-      "Cloud & software",
-      "Marketing",
-      "Operations",
-      "Professional fees",
-      "Travel",
-      "Government fees",
-      "Salaries",
-    ]),
+    category: z.string().trim().min(1).max(60),
     date: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -170,6 +162,9 @@ export class FinanceStore {
       );
     }
     this.db.exec(readFileSync(resolve(__dirname, "schema.sql"), "utf8"));
+    this.db.exec(
+      "INSERT OR IGNORE INTO workspace_categories(entity_id,name,accounting_category) SELECT entity_id,name,accounting_category FROM subscription_categories",
+    );
     if (!this.get("SELECT version FROM migrations WHERE version=4"))
       this.tx(() => {
         for (const field of expenseFields)
@@ -456,6 +451,7 @@ export class FinanceStore {
       )
     )
       throw new DomainError("Vendor does not belong to this entity");
+    this.categoryAccount(s.entity_id, s.category);
     if (s.kind === "bill" && !s.invoice_number)
       throw new DomainError("Bills require an invoice number");
     if (s.parent_id) {
@@ -508,6 +504,78 @@ export class FinanceStore {
         "Already-paid company expenses require a payment reference",
       );
     return s;
+  }
+  categoryAccount(entity: string, name: string): string {
+    const base = this.get(
+      "SELECT accounting_category FROM workspace_categories WHERE entity_id=? AND name=? COLLATE NOCASE",
+      entity,
+      name,
+    )?.accounting_category;
+    const code = Object.hasOwn(categories,name) ? categories[name] : Object.hasOwn(categories,base) ? categories[base] : undefined;
+    if (!code) throw new DomainError("Choose a saved expense category");
+    return code;
+  }
+  categoryList(a: Actor, entity: string) {
+    this.authorize(a, entity, [
+      "finance",
+      "cfo",
+      "auditor",
+      "reconciler",
+      "employee",
+      "manager",
+      "payer",
+    ]);
+    return [
+      ...Object.keys(categories).map((name) => ({
+        name,
+        accounting_category: name,
+      })),
+      ...this.all(
+        "SELECT name,accounting_category FROM workspace_categories WHERE entity_id=? ORDER BY name",
+        entity,
+      ),
+    ];
+  }
+  addCategory(a: Actor, input: any) {
+    const p = z
+      .object({
+        entity_id: z.enum(["ng", "inc"]),
+        name: z.string().trim().min(2).max(60),
+        accounting_category: z.string(),
+      })
+      .safeParse(input);
+    if (!p.success)
+      throw new DomainError("Enter a category name and accounting group");
+    const v = p.data;
+    this.authorize(a, v.entity_id, ["finance"]);
+    if (!Object.hasOwn(categories,v.accounting_category))
+      throw new DomainError("Choose an accounting group");
+    if (
+      Object.keys(categories).some(
+        (n) => n.toLowerCase() === v.name.toLowerCase(),
+      )
+    )
+      throw new DomainError("That category already exists", 409);
+    return this.tx(() => {
+      if (
+        this.get(
+          "SELECT name FROM workspace_categories WHERE entity_id=? AND name=? COLLATE NOCASE",
+          v.entity_id,
+          v.name,
+        )
+      )
+        throw new DomainError("That category already exists", 409);
+      this.run(
+        "INSERT INTO workspace_categories VALUES(?,?,?)",
+        v.entity_id,
+        v.name,
+        v.accounting_category,
+      );
+      this.audit(v.entity_id, a, "category.created", v.name, {
+        accounting_category: v.accounting_category,
+      });
+      return v;
+    });
   }
   createSpend(a: Actor, input: unknown) {
     const s = this.validateSpend(a, input);
@@ -997,7 +1065,7 @@ export class FinanceStore {
           approved_by: s.finance_id,
           lines: [
             {
-              account: categories[s.category],
+              account: this.categoryAccount(s.entity_id, s.category),
               debit: s.amount_minor,
               credit: 0,
             },
@@ -1560,7 +1628,7 @@ export class FinanceStore {
       } else if (action === "post") {
         if (s.status !== "reconciled")
           throw new DomainError("Reconcile the payment before final posting");
-        const account = categories[s.category];
+        const account = this.categoryAccount(s.entity_id, s.category);
         this.postJournal(a, {
           entity_id: s.entity_id,
           date: s.date,

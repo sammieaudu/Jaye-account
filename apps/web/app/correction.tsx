@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState, type FormEvent } from "react";
 import Select from "./select";
+import CategorySelect from "./category-select";
 type Row = Record<string, any>;
 export default function Correction({
   source,
@@ -153,18 +154,7 @@ export default function Correction({
               <>
                 <label>
                   Category
-                  <Select name="category" defaultValue={source.category}>
-                    {[
-                      "Operations",
-                      "Cloud & software",
-                      "Marketing",
-                      "Professional fees",
-                      "Travel",
-                      "Government fees",
-                    ].map((x) => (
-                      <option key={x}>{x}</option>
-                    ))}
-                  </Select>
+                  <CategorySelect entity={source.entity_id} defaultValue={source.category} />
                 </label>
                 <label>
                   Department

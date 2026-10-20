@@ -282,7 +282,7 @@ export class BookkeepingService {
           throw new DomainError(
             "Salary for this employee and month is already recorded. Open it to add a payment.",
           );
-      } else if (!categories[p.category])
+      } else if (!this.s.categoryAccount(p.entity_id, p.category))
         throw new DomainError("Choose an expense category");
       if (!payee) throw new DomainError("Enter who is owed this money");
       if (p.due_date < p.date)
@@ -340,7 +340,10 @@ export class BookkeepingService {
         approved_by: a.id,
         lines: [
           {
-            account: p.kind === "salary" ? "6700" : categories[p.category],
+            account:
+              p.kind === "salary"
+                ? "6700"
+                : this.s.categoryAccount(p.entity_id, p.category),
             debit: p.amount_minor,
             credit: 0,
           },
@@ -444,7 +447,7 @@ export class BookkeepingService {
         if (next.due_date < p.date)
           throw new DomainError("Due date cannot be before the record date");
         if (old.kind === "salary") next.category = "Salaries";
-        if (!categories[next.category])
+        if (!this.s.categoryAccount(old.entity_id, next.category))
           throw new DomainError("Choose an expense category");
         if (next.employee_id) {
           const person = this.s.get(
@@ -591,7 +594,7 @@ export class BookkeepingService {
       if (!next.voided) {
         const account =
           kind === "record"
-            ? categories[next.category]
+            ? this.s.categoryAccount(old.entity_id, next.category)
             : next.method === "Cash"
               ? "1010"
               : "1100";
@@ -931,7 +934,11 @@ export class BookkeepingService {
             debit: p.amount_minor,
             credit: 0,
           },
-          { account: categories[r.category], debit: 0, credit: p.amount_minor },
+          {
+            account: this.s.categoryAccount(r.entity_id, r.category),
+            debit: 0,
+            credit: p.amount_minor,
+          },
         ],
       });
       this.s.audit(r.entity_id, a, "bookkeeping.refund_recorded", id, {
@@ -973,7 +980,11 @@ export class BookkeepingService {
         idempotency_key: `record:${fid}:refund-reversal`,
         approved_by: a.id,
         lines: [
-          { account: categories[r.category], debit: f.amount_minor, credit: 0 },
+          {
+            account: this.s.categoryAccount(r.entity_id, r.category),
+            debit: f.amount_minor,
+            credit: 0,
+          },
           {
             account: f.method === "Cash" ? "1010" : "1100",
             debit: 0,
