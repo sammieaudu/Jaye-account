@@ -3712,3 +3712,15 @@ footer {
   width: 16px;
   height: 16px;
 }
+
+.workspace-quick-guide { margin: 0 0 24px; padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: #f7faf8; }
+.quick-guide-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.workspace-quick-guide h2 { margin: 0 0 8px; font-size: 20px; }
+.workspace-quick-guide p { margin: 12px 0 0; line-height: 1.6; font-size: 14px; }
+.quick-guide-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.quick-guide-item { display: flex; flex-direction: column; gap: 10px; padding: 18px; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: white; color: inherit; cursor: pointer; }
+.quick-guide-item:hover { border-color: #2b7966; }
+.quick-guide-item span { font-size: 13px; line-height: 1.6; }
+.quick-guide-link { color: #2b7966; margin-top: auto; }
+@media (max-width: 1000px) { .quick-guide-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .quick-guide-grid { grid-template-columns: 1fr; } .workspace-quick-guide { padding: 16px; } .quick-guide-heading { flex-direction: column; } }
