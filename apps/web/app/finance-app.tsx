@@ -68,6 +68,8 @@ const menuGroups = [
     items: [
       { label: "Employees", icon: Users },
       { label: "Payroll", icon: Wallet },
+      { label: "Reimbursements", icon: Wallet },
+      { label: "Recoveries", icon: ArrowDownLeft },
     ],
   },
   {
@@ -78,19 +80,15 @@ const menuGroups = [
     ],
   },
   {
-    title: "Approvals & repayments",
-    advanced: true,
+    title: "Approvals",
     items: [
       { label: "Spend", icon: Receipt, display: "Approval requests" },
       { label: "Approvals", icon: CheckCheck },
       { label: "Payments", icon: Landmark, display: "Payment approvals" },
-      { label: "Reimbursements", icon: Wallet },
-      { label: "Recoveries", icon: ArrowDownLeft },
     ],
   },
   {
     title: "Accounting & review",
-    advanced: true,
     items: [
       { label: "General ledger", icon: Layers3 },
       { label: "Audit trail", icon: ShieldCheck },
@@ -221,7 +219,7 @@ export default function Home() {
     [modal, setModal] = useState(""),
     [busy, setBusy] = useState(false),
     [nav, setNav] = useState(false),
-    [advanced, setAdvanced] = useState(false);
+    [openMenuGroup, setOpenMenuGroup] = useState("Expenses & suppliers");
   useEffect(() => {
     if (!nav) return;
     const closeMenu = (event: KeyboardEvent) => {
@@ -390,13 +388,10 @@ export default function Home() {
     }
   }
   function navigate(name: string) {
-    if (
-      menuGroups.some(
-        (group) =>
-          group.advanced && group.items.some((item) => item.label === name),
-      )
-    )
-      setAdvanced(true);
+    const group = menuGroups.find((group) =>
+      group.items.some((item) => item.label === name),
+    );
+    if (group && group.title !== "Workspace") setOpenMenuGroup(group.title);
     setRecordTarget("");
     setRegisterDetail(null);
     setDetail(null);
@@ -661,35 +656,41 @@ export default function Home() {
           <img src="/brand/jaye.svg" alt="Jaye" />
           <span className="brand-finance">Finance</span>
         </a>
-        <nav aria-label="Main navigation">
+        <nav aria-label="Main navigation" className="task-navigation">
+          {renderMenuItem({ label: "Overview", icon: LayoutDashboard })}
+          <span className="nav-section-label">YOUR WORKSPACE</span>
           {menuGroups
-            .filter((group) => !group.advanced)
-            .map((group) => (
-              <div className="nav-group" key={group.title}>
-                <div className="nav-caption">{group.title}</div>
-                {group.items.map((item) => renderMenuItem(item))}
-              </div>
-            ))}
-          <button
-            className="advanced-toggle"
-            aria-expanded={advanced}
-            aria-controls="additional-navigation"
-            onClick={() => setAdvanced(!advanced)}
-          >
-            <Settings2 size={18} />
-            <span>More accounting tools</span>
-            <ChevronDown size={16} />
-          </button>
-          <div id="additional-navigation" hidden={!advanced}>
-            {menuGroups
-              .filter((group) => group.advanced)
-              .map((group) => (
-                <div className="nav-group" key={group.title}>
-                  <div className="nav-caption">{group.title}</div>
-                  {group.items.map((item) => renderMenuItem(item))}
+            .filter((group) => group.title !== "Workspace")
+            .map((group, index) => {
+              const expanded = openMenuGroup === group.title;
+              const containsPage = group.items.some(
+                (item) => item.label === page,
+              );
+              const Icon = group.items[0].icon;
+              return (
+                <div className="task-nav-group" key={group.title}>
+                  <button
+                    className={`task-nav-heading ${containsPage ? "contains-active" : ""}`}
+                    aria-expanded={expanded}
+                    aria-controls={`menu-group-${index}`}
+                    onClick={() =>
+                      setOpenMenuGroup(expanded ? "" : group.title)
+                    }
+                  >
+                    <Icon size={18} />
+                    <span>{group.title}</span>
+                    <ChevronDown size={15} />
+                  </button>
+                  <div
+                    id={`menu-group-${index}`}
+                    className="task-nav-items"
+                    hidden={!expanded}
+                  >
+                    {group.items.map(renderMenuItem)}
+                  </div>
                 </div>
-              ))}
-          </div>
+              );
+            })}
         </nav>
         <div className="sidebar-bottom">
           <button
@@ -1089,7 +1090,7 @@ export default function Home() {
                     className="button primary"
                     onClick={() =>
                       page === "Overview"
-                        ? navigate("Expenses")
+                        ? openRecord("new", "expense")
                         : setModal("spend")
                     }
                   >
@@ -1415,7 +1416,6 @@ export default function Home() {
                             <button
                               className="button"
                               onClick={() => {
-                                setAdvanced(true);
                                 navigate("Spend");
                               }}
                             >

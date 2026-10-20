@@ -81,7 +81,7 @@ export default function Bookkeeping({
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
-    [form, setForm] = useState(false),
+    [form, setForm] = useState(initialRecordId === "new"),
     [edit, setEdit] = useState<Row | null>(null),
     [detail, setDetail] = useState<Row | null>(null),
     [query, setQuery] = useState(initialQuery),
@@ -148,6 +148,10 @@ export default function Bookkeeping({
   }, [entity, request]);
   useEffect(() => {
     if (!initialRecordId) return;
+    if (initialRecordId === "new") {
+      start();
+      return;
+    }
     let active = true;
     setError("");
     request(`/records/${initialRecordId}`)

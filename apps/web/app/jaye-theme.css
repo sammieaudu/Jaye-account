@@ -3644,5 +3644,71 @@ footer {
   transform: rotate(180deg);
 }
 
-.hosted-sign-in { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 24px; text-align: center; }
-.hosted-user { position: fixed; bottom: 26px; right: 26px; z-index: 80; }
+.hosted-sign-in {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 24px;
+  text-align: center;
+}
+.hosted-user {
+  position: fixed;
+  bottom: 26px;
+  right: 26px;
+  z-index: 80;
+}
+
+/* Compact, task-based accordion navigation. */
+.sidebar .task-navigation {
+  gap: 6px;
+}
+.nav-section-label {
+  display: block;
+  padding: 18px 10px 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+}
+.sidebar .task-nav-heading {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  text-align: left;
+  color: var(--ink);
+  font-size: 13px;
+}
+.task-nav-heading > span {
+  flex: 1;
+}
+.task-nav-heading > svg:last-child {
+  transition: transform 0.16s ease;
+}
+.task-nav-heading[aria-expanded="true"] > svg:last-child {
+  transform: rotate(180deg);
+}
+.sidebar .task-nav-heading.contains-active {
+  color: var(--green);
+}
+.sidebar .task-nav-items {
+  margin: 2px 0 10px 18px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.sidebar .task-nav-items:not([hidden]) {
+  display: grid;
+  gap: 4px;
+}
+.sidebar .task-nav-items button {
+  width: 100%;
+  min-height: 38px;
+  text-align: left;
+  font-size: 13px;
+}
+.sidebar .task-nav-items button > svg {
+  width: 16px;
+  height: 16px;
+}
