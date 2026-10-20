@@ -43,3 +43,69 @@ CREATE TRIGGER IF NOT EXISTS source_entity BEFORE INSERT ON journals WHEN NEW.so
 CREATE TRIGGER IF NOT EXISTS inactive_account BEFORE INSERT ON lines WHEN (SELECT active FROM accounts WHERE entity_id=NEW.entity_id AND code=NEW.account)<>1 BEGIN SELECT RAISE(ABORT,'Inactive account'); END;
 CREATE TABLE IF NOT EXISTS bank_transactions(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL REFERENCES entities(id),reference TEXT NOT NULL,date TEXT NOT NULL,currency TEXT NOT NULL,amount_minor INTEGER NOT NULL CHECK(amount_minor>0),description TEXT NOT NULL,matched_spend_id TEXT REFERENCES spends(id),imported_by TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,UNIQUE(entity_id,reference),UNIQUE(matched_spend_id));
 INSERT OR IGNORE INTO migrations VALUES(3, datetime('now'));
+
+CREATE TABLE IF NOT EXISTS reimbursement_claims(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL REFERENCES entities(id),claimant_id TEXT NOT NULL REFERENCES users(id),requester_id TEXT NOT NULL REFERENCES users(id),title TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'draft',revision INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS reimbursement_items(claim_id TEXT NOT NULL REFERENCES reimbursement_claims(id),spend_id TEXT PRIMARY KEY REFERENCES spends(id));
+CREATE TABLE IF NOT EXISTS reimbursement_payments(id TEXT PRIMARY KEY,claim_id TEXT NOT NULL REFERENCES reimbursement_claims(id),entity_id TEXT NOT NULL REFERENCES entities(id),amount_minor INTEGER NOT NULL CHECK(amount_minor>0),date TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','paid','reconciled','posted','cancelled')),scheduled_by TEXT NOT NULL REFERENCES users(id),payer_id TEXT REFERENCES users(id),reconciler_id TEXT REFERENCES users(id),reference TEXT,created_at TEXT NOT NULL,UNIQUE(entity_id,reference));
+CREATE TABLE IF NOT EXISTS reimbursement_allocations(payment_id TEXT NOT NULL REFERENCES reimbursement_payments(id),spend_id TEXT NOT NULL REFERENCES spends(id),amount_minor INTEGER NOT NULL CHECK(amount_minor>0),PRIMARY KEY(payment_id,spend_id));
+CREATE TABLE IF NOT EXISTS reimbursement_matches(bank_transaction_id TEXT PRIMARY KEY REFERENCES bank_transactions(id),payment_id TEXT NOT NULL UNIQUE REFERENCES reimbursement_payments(id));
+CREATE TRIGGER IF NOT EXISTS reimbursement_payment_final_update BEFORE UPDATE ON reimbursement_payments WHEN OLD.status IN ('posted','cancelled') BEGIN SELECT RAISE(ABORT,'Final repayments are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS reimbursement_payment_delete BEFORE DELETE ON reimbursement_payments BEGIN SELECT RAISE(ABORT,'Repayment history is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS reimbursement_allocation_update BEFORE UPDATE ON reimbursement_allocations BEGIN SELECT RAISE(ABORT,'Repayment allocations are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS reimbursement_allocation_delete BEFORE DELETE ON reimbursement_allocations BEGIN SELECT RAISE(ABORT,'Repayment allocations are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS reimbursement_match_update BEFORE UPDATE ON reimbursement_matches BEGIN SELECT RAISE(ABORT,'Reconciliation is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS reimbursement_match_delete BEFORE DELETE ON reimbursement_matches BEGIN SELECT RAISE(ABORT,'Reconciliation is immutable'); END;
+INSERT OR IGNORE INTO migrations VALUES(5, datetime('now'));
+
+CREATE TABLE IF NOT EXISTS subscriptions(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL REFERENCES entities(id),vendor_id TEXT NOT NULL REFERENCES vendors(id),owner_id TEXT NOT NULL REFERENCES users(id),created_by TEXT NOT NULL REFERENCES users(id),name TEXT NOT NULL,purpose TEXT NOT NULL,plan TEXT NOT NULL,seats INTEGER NOT NULL CHECK(seats>0),department TEXT NOT NULL,category TEXT NOT NULL,currency TEXT NOT NULL,amount_minor INTEGER NOT NULL CHECK(amount_minor>0),cadence TEXT NOT NULL CHECK(cadence IN ('monthly','annual','custom_days')),interval_count INTEGER NOT NULL CHECK(interval_count>0),billing_anchor TEXT NOT NULL,renewal_date TEXT NOT NULL,cancellation_deadline TEXT NOT NULL,auto_renew INTEGER NOT NULL DEFAULT 1,payment_method TEXT NOT NULL,payment_account TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','cancelled')),revision INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS subscription_terms(id INTEGER PRIMARY KEY AUTOINCREMENT,subscription_id TEXT NOT NULL REFERENCES subscriptions(id),starts_on TEXT NOT NULL,ends_before TEXT,anchor TEXT NOT NULL,amount_minor INTEGER NOT NULL CHECK(amount_minor>0),cadence TEXT NOT NULL,interval_count INTEGER NOT NULL CHECK(interval_count>0));
+CREATE TABLE IF NOT EXISTS subscription_charges(id TEXT PRIMARY KEY,subscription_id TEXT NOT NULL REFERENCES subscriptions(id),due_date TEXT NOT NULL,expected_minor INTEGER NOT NULL CHECK(expected_minor>0),spend_id TEXT NOT NULL UNIQUE REFERENCES spends(id),created_at TEXT NOT NULL,UNIQUE(subscription_id,due_date));
+CREATE INDEX IF NOT EXISTS subscription_entity_owner ON subscriptions(entity_id,owner_id);
+INSERT OR IGNORE INTO migrations VALUES(6, datetime('now'));
+
+CREATE TABLE IF NOT EXISTS refunds(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL REFERENCES entities(id),spend_id TEXT NOT NULL REFERENCES spends(id),amount_minor INTEGER NOT NULL CHECK(amount_minor>0),reference TEXT NOT NULL,reason TEXT NOT NULL,date TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','reconciled','posted','cancelled')),created_by TEXT NOT NULL REFERENCES users(id),reconciler_id TEXT REFERENCES users(id),bank_transaction_id TEXT UNIQUE REFERENCES bank_transactions(id),created_at TEXT NOT NULL,UNIQUE(entity_id,reference));
+CREATE TRIGGER IF NOT EXISTS refund_final_update BEFORE UPDATE ON refunds WHEN OLD.status IN ('posted','cancelled') BEGIN SELECT RAISE(ABORT,'Final refunds are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS refund_delete BEFORE DELETE ON refunds BEGIN SELECT RAISE(ABORT,'Refund history is immutable'); END;
+
+CREATE TABLE IF NOT EXISTS expense_adjustments(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL REFERENCES entities(id),spend_id TEXT NOT NULL REFERENCES spends(id),kind TEXT NOT NULL CHECK(kind IN ('credit_note','personal_refund')),amount_minor INTEGER NOT NULL CHECK(amount_minor>0),reference TEXT NOT NULL,reason TEXT NOT NULL,evidence_reference TEXT NOT NULL,date TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','verified','posted','cancelled')),created_by TEXT NOT NULL REFERENCES users(id),verified_by TEXT REFERENCES users(id),payable_reduction_minor INTEGER NOT NULL DEFAULT 0,recoverable_minor INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,UNIQUE(entity_id,reference));
+CREATE TRIGGER IF NOT EXISTS adjustment_final_update BEFORE UPDATE ON expense_adjustments WHEN OLD.status IN ('posted','cancelled') BEGIN SELECT RAISE(ABORT,'Final adjustments are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS adjustment_delete BEFORE DELETE ON expense_adjustments BEGIN SELECT RAISE(ABORT,'Adjustment history is immutable'); END;
+
+CREATE TABLE IF NOT EXISTS recovery_payments(id TEXT PRIMARY KEY,adjustment_id TEXT NOT NULL REFERENCES expense_adjustments(id),entity_id TEXT NOT NULL REFERENCES entities(id),person_id TEXT NOT NULL REFERENCES users(id),amount_minor INTEGER NOT NULL CHECK(amount_minor>0),date TEXT NOT NULL,reference TEXT NOT NULL,note TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','reconciled','posted','cancelled')),created_by TEXT NOT NULL REFERENCES users(id),reconciler_id TEXT REFERENCES users(id),bank_transaction_id TEXT UNIQUE REFERENCES bank_transactions(id),created_at TEXT NOT NULL,UNIQUE(entity_id,reference));
+CREATE TRIGGER IF NOT EXISTS recovery_final_update BEFORE UPDATE ON recovery_payments WHEN OLD.status IN ('posted','cancelled') BEGIN SELECT RAISE(ABORT,'Final recoveries are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS recovery_delete BEFORE DELETE ON recovery_payments BEGIN SELECT RAISE(ABORT,'Recovery history is immutable'); END;
+
+-- Accountant-entered records document obligations and payments already made.
+CREATE TABLE IF NOT EXISTS employees(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL REFERENCES entities(id),name TEXT NOT NULL,employee_code TEXT NOT NULL,department TEXT NOT NULL,job_title TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('employee','founder')),salary_minor INTEGER NOT NULL CHECK(salary_minor>=0),start_date TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,revision INTEGER NOT NULL DEFAULT 0,UNIQUE(entity_id,employee_code));
+CREATE TABLE IF NOT EXISTS bookkeeping_records(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL REFERENCES entities(id),kind TEXT NOT NULL CHECK(kind IN ('expense','salary')),description TEXT NOT NULL,payee TEXT NOT NULL,employee_id TEXT REFERENCES employees(id),category TEXT NOT NULL,department TEXT NOT NULL,amount_minor INTEGER NOT NULL CHECK(amount_minor>0),date TEXT NOT NULL,due_date TEXT NOT NULL,payroll_month TEXT,reference TEXT NOT NULL,note TEXT NOT NULL,created_by TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,request_key TEXT NOT NULL UNIQUE);
+CREATE UNIQUE INDEX IF NOT EXISTS payroll_month_unique ON bookkeeping_records(entity_id,employee_id,payroll_month) WHERE kind='salary';
+CREATE UNIQUE INDEX IF NOT EXISTS bookkeeping_invoice_unique ON bookkeeping_records(entity_id,payee,reference) WHERE reference<>'' AND kind='expense';
+CREATE TABLE IF NOT EXISTS bookkeeping_payments(id TEXT PRIMARY KEY,record_id TEXT NOT NULL REFERENCES bookkeeping_records(id),entity_id TEXT NOT NULL REFERENCES entities(id),amount_minor INTEGER NOT NULL CHECK(amount_minor>0),date TEXT NOT NULL,reference TEXT NOT NULL,method TEXT NOT NULL,note TEXT NOT NULL,created_by TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,request_key TEXT NOT NULL UNIQUE,UNIQUE(entity_id,reference));
+
+CREATE TRIGGER IF NOT EXISTS bookkeeping_record_no_delete BEFORE DELETE ON bookkeeping_records BEGIN SELECT RAISE(ABORT,'Recorded expenses are immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS bookkeeping_payment_no_delete BEFORE DELETE ON bookkeeping_payments BEGIN SELECT RAISE(ABORT,'Recorded payments are immutable'); END;
+INSERT OR IGNORE INTO migrations VALUES(9, datetime('now'));
+CREATE TABLE IF NOT EXISTS record_attachments(id TEXT PRIMARY KEY,record_id TEXT NOT NULL REFERENCES bookkeeping_records(id),filename TEXT NOT NULL,mime TEXT NOT NULL,hash TEXT NOT NULL,encrypted BLOB NOT NULL,created_at TEXT NOT NULL,UNIQUE(record_id,hash));
+CREATE TRIGGER IF NOT EXISTS record_attachment_no_update BEFORE UPDATE ON record_attachments BEGIN SELECT RAISE(ABORT,'Attachments are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS record_attachment_no_delete BEFORE DELETE ON record_attachments BEGIN SELECT RAISE(ABORT,'Attachments are immutable'); END;
+
+CREATE TABLE IF NOT EXISTS bookkeeping_corrections(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL REFERENCES entities(id),kind TEXT NOT NULL,target_id TEXT NOT NULL,revision INTEGER NOT NULL,before_json TEXT NOT NULL,after_json TEXT NOT NULL,reason TEXT NOT NULL,request_key TEXT NOT NULL UNIQUE,actor_id TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,UNIQUE(kind,target_id,revision));
+CREATE TRIGGER IF NOT EXISTS correction_no_update BEFORE UPDATE ON bookkeeping_corrections BEGIN SELECT RAISE(ABORT,'Correction history is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS correction_no_delete BEFORE DELETE ON bookkeeping_corrections BEGIN SELECT RAISE(ABORT,'Correction history is immutable'); END;
+
+CREATE TABLE IF NOT EXISTS subscription_records(
+ subscription_id TEXT NOT NULL REFERENCES subscriptions(id),
+ due_date TEXT NOT NULL,
+ record_id TEXT NOT NULL UNIQUE REFERENCES bookkeeping_records(id),
+ expected_minor INTEGER NOT NULL CHECK(expected_minor>0),
+ PRIMARY KEY(subscription_id,due_date)
+);
+
+CREATE TABLE IF NOT EXISTS subscription_categories(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL REFERENCES entities(id),name TEXT NOT NULL COLLATE NOCASE,accounting_category TEXT NOT NULL,UNIQUE(entity_id,name));
+CREATE TABLE IF NOT EXISTS subscription_details(subscription_id TEXT PRIMARY KEY REFERENCES subscriptions(id),start_date TEXT NOT NULL,employee_id TEXT REFERENCES employees(id),category_id TEXT REFERENCES subscription_categories(id),users_count INTEGER);
+
+CREATE TABLE IF NOT EXISTS bookkeeping_refunds(id TEXT PRIMARY KEY,record_id TEXT NOT NULL REFERENCES bookkeeping_records(id),entity_id TEXT NOT NULL REFERENCES entities(id),amount_minor INTEGER NOT NULL CHECK(amount_minor>0),date TEXT NOT NULL,reference TEXT NOT NULL,method TEXT NOT NULL,reason TEXT NOT NULL,created_by TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,request_key TEXT NOT NULL UNIQUE,voided INTEGER NOT NULL DEFAULT 0,UNIQUE(entity_id,reference));
+CREATE TABLE IF NOT EXISTS bookkeeping_bank_matches(bank_transaction_id TEXT PRIMARY KEY REFERENCES bank_transactions(id),payment_id TEXT UNIQUE REFERENCES bookkeeping_payments(id),refund_id TEXT UNIQUE REFERENCES bookkeeping_refunds(id),matched_by TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,CHECK((payment_id IS NOT NULL)+(refund_id IS NOT NULL)=1));
+CREATE TRIGGER IF NOT EXISTS bookkeeping_refund_no_delete BEFORE DELETE ON bookkeeping_refunds BEGIN SELECT RAISE(ABORT,'Refund history cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS bookkeeping_refund_no_rewrite BEFORE UPDATE ON bookkeeping_refunds WHEN NEW.id<>OLD.id OR NEW.record_id<>OLD.record_id OR NEW.entity_id<>OLD.entity_id OR NEW.amount_minor<>OLD.amount_minor OR NEW.date<>OLD.date OR NEW.reference<>OLD.reference OR NEW.method<>OLD.method OR NEW.reason<>OLD.reason OR NEW.request_key<>OLD.request_key OR OLD.voided=1 OR NEW.voided<>1 BEGIN SELECT RAISE(ABORT,'Refunds can only be reversed, not rewritten'); END;

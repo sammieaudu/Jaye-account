@@ -37,7 +37,63 @@ export const categories: Record<string, string> = {
   "Professional fees": "6400",
   Travel: "6500",
   "Government fees": "6600",
+  Salaries: "6700",
 };
+const optionalDate = z
+  .string()
+  .refine(
+    (v) =>
+      v === "" ||
+      (/^\d{4}-\d{2}-\d{2}$/.test(v) &&
+        !isNaN(Date.parse(v)) &&
+        new Date(v).toISOString().slice(0, 10) === v),
+    "Invalid date",
+  )
+  .default("");
+const expenseFields = [
+  "payment_source",
+  "paid_by_id",
+  "original_paid_date",
+  "original_payment_reference",
+  "payment_method",
+  "payment_account",
+  "invoice_date",
+  "due_date",
+] as const;
+export function expensePosition(s: any) {
+  const personal = s.payment_source !== "company";
+  const settled = ["paid", "reconciled", "posted"].includes(s.status);
+  return {
+    approval_status: ["scheduled", "paid", "reconciled", "posted"].includes(
+      s.status,
+    )
+      ? "approved"
+      : s.status,
+    settlement_status:
+      s.status === "rejected"
+        ? "Not approved"
+        : s.kind === "request"
+          ? "Not payable yet"
+          : settled
+            ? personal
+              ? "Reimbursed"
+              : "Paid by Jaye"
+            : personal
+              ? s.status === "approved" || s.status === "scheduled"
+                ? "Reimbursement due"
+                : "Reimbursement pending approval"
+              : s.original_paid_date
+                ? "Company payment recorded · verification pending"
+                : "Unpaid",
+    outstanding_minor:
+      s.kind === "request" ||
+      settled ||
+      s.status === "rejected" ||
+      (!personal && s.original_paid_date)
+        ? 0
+        : s.amount_minor,
+  };
+}
 const spendInput = z
   .object({
     entity_id: z.enum(["inc", "ng"]),
@@ -47,7 +103,13 @@ const spendInput = z
     purpose: z.string().trim().min(5).max(1000),
     amount_minor: int,
     currency: z.enum(["USD", "NGN"]),
-    department: z.enum(["Engineering", "Marketing", "Operations", "Finance"]),
+    department: z.enum([
+      "Product",
+      "Engineering",
+      "Marketing",
+      "Operations",
+      "Finance",
+    ]),
     category: z.enum([
       "Cloud & software",
       "Marketing",
@@ -55,6 +117,7 @@ const spendInput = z
       "Professional fees",
       "Travel",
       "Government fees",
+      "Salaries",
     ]),
     date: z
       .string()
@@ -64,8 +127,20 @@ const spendInput = z
           !isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v,
         "Invalid date",
       ),
-    invoice_number: z.string().max(100).optional(),
+    invoice_number: z.string().trim().max(100).default(""),
     parent_id: z.string().optional(),
+    payment_source: z
+      .enum(["company", "employee", "founder"])
+      .default("company"),
+    paid_by_id: z.string().max(100).default(""),
+    original_paid_date: optionalDate,
+    original_payment_reference: z.string().trim().max(120).default(""),
+    payment_method: z
+      .enum(["", "bank_transfer", "card", "cash", "other"])
+      .default(""),
+    payment_account: z.string().trim().max(100).default(""),
+    invoice_date: optionalDate,
+    due_date: optionalDate,
   })
   .strict();
 export class FinanceStore {
@@ -75,7 +150,8 @@ export class FinanceStore {
   private inTransaction = false;
   constructor(
     filename = resolve(process.cwd(), "../../data/jaye.db"),
-    seed = true,
+    seed: boolean | "empty" = true,
+    private readonly workspaceEntity?: "ng" | "inc",
   ) {
     this.dir =
       filename === ":memory:"
@@ -94,11 +170,73 @@ export class FinanceStore {
       );
     }
     this.db.exec(readFileSync(resolve(__dirname, "schema.sql"), "utf8"));
+    if (!this.get("SELECT version FROM migrations WHERE version=4"))
+      this.tx(() => {
+        for (const field of expenseFields)
+          this.db.exec(
+            `ALTER TABLE spends ADD COLUMN ${field} TEXT NOT NULL DEFAULT '${field === "payment_source" ? "company" : ""}'`,
+          );
+        this.db.exec(
+          "ALTER TABLE spends ADD COLUMN revision INTEGER NOT NULL DEFAULT 0",
+        );
+        this.run("INSERT INTO migrations VALUES(4,?)", now());
+      });
+    if (!this.get("SELECT version FROM migrations WHERE version=7"))
+      this.tx(() => {
+        this.db.exec(
+          "ALTER TABLE bank_transactions ADD COLUMN direction TEXT NOT NULL DEFAULT 'debit' CHECK(direction IN ('debit','credit'))",
+        );
+        this.run("INSERT INTO migrations VALUES(7,?)", now());
+      });
+    if (!this.get("SELECT version FROM migrations WHERE version=8"))
+      this.tx(() => {
+        this.db.exec(
+          "ALTER TABLE spends ADD COLUMN payment_amount_minor INTEGER",
+        );
+        this.run("INSERT INTO migrations VALUES(8,?)", now());
+      });
+    if (!this.get("SELECT version FROM migrations WHERE version=10"))
+      this.tx(() => {
+        this.db.exec(
+          "DROP TRIGGER IF EXISTS bookkeeping_record_no_update; DROP TRIGGER IF EXISTS bookkeeping_payment_no_update;",
+        );
+        for (const table of ["bookkeeping_records", "bookkeeping_payments"])
+          this.db.exec(
+            `ALTER TABLE ${table} ADD COLUMN revision INTEGER NOT NULL DEFAULT 0; ALTER TABLE ${table} ADD COLUMN voided INTEGER NOT NULL DEFAULT 0;`,
+          );
+        this.db.exec(
+          "DROP INDEX IF EXISTS payroll_month_unique; DROP INDEX IF EXISTS bookkeeping_invoice_unique; CREATE UNIQUE INDEX payroll_month_unique ON bookkeeping_records(entity_id,employee_id,payroll_month) WHERE kind='salary' AND voided=0; CREATE UNIQUE INDEX bookkeeping_invoice_unique ON bookkeeping_records(entity_id,payee,reference) WHERE reference<>'' AND kind='expense' AND voided=0;",
+        );
+        for (const table of [
+          "employees",
+          "spends",
+          "subscriptions",
+          "budgets",
+          "bookkeeping_records",
+        ])
+          this.run(
+            `UPDATE ${table} SET department='Product' WHERE department='Engineering'`,
+          );
+        this.run(
+          "INSERT INTO migrations VALUES(10,?)",
+          new Date().toISOString(),
+        );
+      });
+    for (const [table, kind] of [
+      ["bookkeeping_records", "record"],
+      ["bookkeeping_payments", "payment"],
+    ])
+      this.db.exec(
+        `CREATE TRIGGER IF NOT EXISTS ${table}_correction_only BEFORE UPDATE ON ${table} WHEN NEW.revision<>OLD.revision+1 OR NOT EXISTS(SELECT 1 FROM bookkeeping_corrections WHERE kind='${kind}' AND target_id=OLD.id AND revision=NEW.revision) BEGIN SELECT RAISE(ABORT,'Use an audited correction'); END;`,
+      );
     const keyPath = join(this.dir, ".evidence-key");
     if (!existsSync(keyPath))
       writeFileSync(keyPath, randomBytes(32), { mode: 0o600 });
     this.key = readFileSync(keyPath);
-    if (seed && !this.get("SELECT id FROM entities LIMIT 1")) this.seed();
+    if (seed && !this.get("SELECT id FROM entities LIMIT 1")) {
+      if (seed === "empty") this.seedEmpty();
+      else this.seed();
+    }
   }
   get(sql: string, ...args: any[]): any {
     return this.db.prepare(sql).get(...args);
@@ -130,6 +268,8 @@ export class FinanceStore {
     return { ...u, entities: JSON.parse(u.entities) };
   }
   authorize(a: Actor, entity: string, roles?: string[]) {
+    if (this.workspaceEntity && entity !== this.workspaceEntity)
+      throw new DomainError("This workspace uses GoJaye Nigeria Ltd only", 403);
     if (!a.entities.includes(entity))
       throw new DomainError("You do not have access to this legal entity", 403);
     if (a.role === "investor")
@@ -218,25 +358,29 @@ export class FinanceStore {
       hash(token),
       Date.now(),
     );
-    if (!row)
-      throw new DomainError("Choose a local test identity to begin", 401);
+    if (!row) throw new DomainError("Workspace access is required", 401);
     return this.actor(row.user_id);
   }
   logout(token: string) {
     this.run("DELETE FROM sessions WHERE token_hash=?", hash(token));
   }
   entities(a: Actor) {
-    return this.all("SELECT * FROM entities").filter((e) =>
-      a.entities.includes(e.id),
+    return this.all("SELECT * FROM entities").filter(
+      (e) =>
+        a.entities.includes(e.id) &&
+        (!this.workspaceEntity || e.id === this.workspaceEntity),
     );
   }
   list(a: Actor, entity: string) {
     this.authorize(a, entity);
-    const own = a.role === "employee" ? " AND s.requester_id=?" : "";
+    const own =
+      a.role === "employee"
+        ? " AND (s.requester_id=? OR s.paid_by_id=? OR EXISTS(SELECT 1 FROM subscription_charges sc JOIN subscriptions sub ON sub.id=sc.subscription_id WHERE sc.spend_id=s.id AND (sub.owner_id=? OR sub.created_by=?)))"
+        : "";
     return this.all(
       `SELECT s.*,v.name AS vendor,u.name AS requester,(SELECT COUNT(*) FROM receipts r WHERE r.spend_id=s.id) AS receipt_count FROM spends s JOIN vendors v ON v.id=s.vendor_id JOIN users u ON u.id=s.requester_id WHERE s.entity_id=?${own} ORDER BY s.created_at DESC`,
-      ...[entity, ...(own ? [a.id] : [])],
-    );
+      ...[entity, ...(own ? [a.id, a.id, a.id, a.id] : [])],
+    ).map((s) => this.position(s));
   }
   spend(a: Actor, spendId: string) {
     const s = this.get(
@@ -245,12 +389,22 @@ export class FinanceStore {
     );
     if (!s) throw new DomainError("Spend record not found", 404);
     this.authorize(a, s.entity_id);
-    if (a.role === "employee" && s.requester_id !== a.id)
+    if (
+      a.role === "employee" &&
+      s.requester_id !== a.id &&
+      s.paid_by_id !== a.id &&
+      !this.get(
+        "SELECT sc.id FROM subscription_charges sc JOIN subscriptions sub ON sub.id=sc.subscription_id WHERE sc.spend_id=? AND (sub.owner_id=? OR sub.created_by=?)",
+        s.id,
+        a.id,
+        a.id,
+      )
+    )
       throw new DomainError(
         "Employees can only access their own expenses",
         403,
       );
-    return s;
+    return this.position(s);
   }
   details(a: Actor, spendId: string) {
     const s = this.spend(a, spendId);
@@ -270,14 +424,14 @@ export class FinanceStore {
       statement_rows:
         a.role === "reconciler"
           ? this.all(
-              "SELECT reference,amount_minor,date FROM bank_transactions WHERE entity_id=? AND amount_minor=? AND matched_spend_id IS NULL",
+              "SELECT reference,amount_minor,date FROM bank_transactions WHERE entity_id=? AND direction='debit' AND amount_minor=? AND matched_spend_id IS NULL AND id NOT IN (SELECT bank_transaction_id FROM bookkeeping_bank_matches) AND id NOT IN (SELECT bank_transaction_id FROM reimbursement_matches)",
               s.entity_id,
-              s.amount_minor,
+              s.payment_amount_minor ?? s.effective_amount_minor,
             )
           : [],
     };
   }
-  createSpend(a: Actor, input: unknown) {
+  validateSpend(a: Actor, input: unknown) {
     const p = spendInput.safeParse(input);
     if (!p.success)
       throw new DomainError(
@@ -320,6 +474,43 @@ export class FinanceStore {
           "Bill must match an approved request, vendor, dimensions and amount",
         );
     }
+    if (s.due_date && s.invoice_date && s.due_date < s.invoice_date)
+      throw new DomainError("Due date cannot precede invoice date");
+    if (
+      s.kind === "request" &&
+      (s.payment_source !== "company" || s.original_paid_date)
+    )
+      throw new DomainError("Spend requests must be unpaid company purchases");
+    if (s.payment_source !== "company") {
+      const payer = this.actor(s.paid_by_id);
+      this.authorize(payer, s.entity_id);
+      if (a.role === "employee" && payer.id !== a.id)
+        throw new DomainError(
+          "Employees may only claim their own personal purchases",
+          403,
+        );
+      if (!s.original_paid_date || !s.payment_method)
+        throw new DomainError(
+          "Personal purchases require the original payment date and method",
+        );
+    } else if (s.paid_by_id)
+      throw new DomainError(
+        "Company purchases cannot have a personal reimbursement recipient",
+      );
+    if (s.original_paid_date && !s.payment_method)
+      throw new DomainError("Select the original payment method");
+    if (
+      s.payment_source === "company" &&
+      s.original_paid_date &&
+      !s.original_payment_reference
+    )
+      throw new DomainError(
+        "Already-paid company expenses require a payment reference",
+      );
+    return s;
+  }
+  createSpend(a: Actor, input: unknown) {
+    const s = this.validateSpend(a, input);
     return this.tx(() => {
       const key = id("SP"),
         t = now();
@@ -343,7 +534,14 @@ export class FinanceStore {
         t,
         t,
       );
+      this.run(
+        `UPDATE spends SET ${expenseFields.map((k) => `${k}=?`).join(",")} WHERE id=?`,
+        ...expenseFields.map((k) => s[k]),
+        key,
+      );
       this.audit(s.entity_id, a, "spend.created", key, {
+        payment_source: s.payment_source,
+        paid_by_id: s.paid_by_id,
         amount_minor: s.amount_minor,
         currency: s.currency,
         kind: s.kind,
@@ -351,6 +549,670 @@ export class FinanceStore {
       return this.spend(a, key);
     });
   }
+  updateSpend(a: Actor, spendId: string, input: any) {
+    return this.tx(() => {
+      const before = this.spend(a, spendId);
+      if (
+        before.requester_id !== a.id ||
+        !["draft", "returned"].includes(before.status)
+      )
+        throw new DomainError(
+          "Only the requester may edit a draft or returned expense",
+          403,
+        );
+      const { expected_revision, ...values } = input;
+      if (expected_revision !== before.revision)
+        throw new DomainError(
+          "This expense changed. Reopen it before editing again.",
+          409,
+        );
+      const s = this.validateSpend(a, values);
+      if (before.subscription_id && s.vendor_id !== before.vendor_id)
+        throw new DomainError(
+          "A linked subscription expense must retain its vendor",
+        );
+      if (
+        before.claim_id &&
+        (s.paid_by_id !== before.paid_by_id ||
+          s.payment_source !== before.payment_source)
+      )
+        throw new DomainError(
+          "Remove the expense from its draft claim before changing its payer",
+        );
+      if (
+        s.entity_id !== before.entity_id ||
+        s.kind !== before.kind ||
+        (s.parent_id || null) !== before.parent_id
+      )
+        throw new DomainError(
+          "Entity, record type and linked request cannot change",
+        );
+      const keys = Object.keys(s);
+      const changes = Object.fromEntries(
+        keys
+          .filter((k) => (before[k] || "") !== ((s as any)[k] || ""))
+          .map((k) => [k, { before: before[k], after: (s as any)[k] }]),
+      );
+      this.run(
+        `UPDATE spends SET ${keys.map((k) => `${k}=?`).join(",")},revision=revision+1,updated_at=? WHERE id=?`,
+        ...keys.map(
+          (k) =>
+            (s as any)[k] ||
+            (k === "parent_id" || k === "invoice_number" ? null : ""),
+        ),
+        now(),
+        spendId,
+      );
+      this.audit(s.entity_id, a, "spend.edited", spendId, { changes });
+      return this.spend(a, spendId);
+    });
+  }
+  private position(s: any) {
+    const item = this.get(
+      "SELECT claim_id FROM reimbursement_items WHERE spend_id=?",
+      s.id,
+    );
+    const subscription = this.get(
+      "SELECT sc.subscription_id,sc.due_date AS billing_date,sub.name AS subscription_name FROM subscription_charges sc JOIN subscriptions sub ON sub.id=sc.subscription_id WHERE sc.spend_id=?",
+      s.id,
+    );
+    const adjusted = this.get(
+      "SELECT COALESCE(SUM(amount_minor),0) AS n FROM expense_adjustments WHERE spend_id=? AND status='posted'",
+      s.id,
+    ).n;
+    const pending = this.get(
+      "SELECT COUNT(*) AS n FROM expense_adjustments WHERE spend_id=? AND status IN ('pending','verified')",
+      s.id,
+    ).n;
+    const recovered = this.get(
+      "SELECT COALESCE(SUM(p.amount_minor),0) AS n FROM recovery_payments p JOIN expense_adjustments ad ON ad.id=p.adjustment_id WHERE ad.spend_id=? AND p.status='posted'",
+      s.id,
+    ).n;
+    const effective = s.amount_minor - adjusted;
+    const totals = item
+      ? this.get(
+          `SELECT COALESCE(SUM(CASE WHEN p.status IN ('paid','reconciled','posted') THEN a.amount_minor ELSE 0 END),0) AS paid, COALESCE(SUM(CASE WHEN p.status='scheduled' THEN a.amount_minor ELSE 0 END),0) AS scheduled FROM reimbursement_allocations a JOIN reimbursement_payments p ON p.id=a.payment_id WHERE a.spend_id=?`,
+          s.id,
+        )
+      : {
+          paid: ["paid", "reconciled", "posted"].includes(s.status)
+            ? (s.payment_amount_minor ?? s.amount_minor)
+            : 0,
+          scheduled: s.status === "scheduled" ? effective : 0,
+        };
+    // A fully credited unpaid item can be posted with zero cash movement.
+    const paid = totals.paid;
+    const position = expensePosition(s);
+    const outstanding =
+      s.status === "rejected" ||
+      s.kind === "request" ||
+      (s.payment_source === "company" && s.original_paid_date)
+        ? 0
+        : Math.max(0, effective - paid);
+    return {
+      ...s,
+      ...position,
+      ...subscription,
+      ...(item ? { claim_id: item.claim_id } : {}),
+      adjustment_minor: adjusted,
+      pending_adjustments: pending,
+      effective_amount_minor: effective,
+      reimbursed_minor: s.payment_source !== "company" ? paid : 0,
+      settled_minor: paid,
+      recovered_minor: recovered,
+      scheduled_minor: totals.scheduled,
+      outstanding_minor: outstanding,
+      recoverable_minor:
+        s.payment_source !== "company"
+          ? Math.max(0, paid - effective - recovered)
+          : 0,
+      settlement_status:
+        adjusted > 0
+          ? paid > effective + recovered
+            ? "Refund due back to Jaye"
+            : outstanding === 0
+              ? "Settled after adjustment"
+              : "Partially credited / refunded"
+          : item && paid > 0
+            ? outstanding === 0
+              ? "Reimbursed"
+              : "Partially reimbursed"
+            : position.settlement_status,
+    };
+  }
+  pendingAdjustment(spendId: string) {
+    return this.get(
+      "SELECT id FROM expense_adjustments WHERE spend_id=? AND status IN ('pending','verified')",
+      spendId,
+    );
+  }
+
+  claim(a: Actor, claimId: string) {
+    const c = this.get(
+      "SELECT c.*,u.name AS claimant FROM reimbursement_claims c JOIN users u ON u.id=c.claimant_id WHERE c.id=?",
+      claimId,
+    );
+    if (!c) throw new DomainError("Claim not found", 404);
+    this.authorize(a, c.entity_id);
+    if (
+      a.role === "employee" &&
+      c.requester_id !== a.id &&
+      c.claimant_id !== a.id
+    )
+      throw new DomainError("You may only view your own claims", 403);
+    const items = this.all(
+      "SELECT s.*,v.name AS vendor FROM spends s JOIN reimbursement_items i ON i.spend_id=s.id JOIN vendors v ON v.id=s.vendor_id WHERE i.claim_id=? ORDER BY s.date,s.id",
+      c.id,
+    ).map((s) => this.position(s));
+    const payments = this.all(
+      "SELECT p.*,m.bank_transaction_id,b.reference AS statement_reference FROM reimbursement_payments p LEFT JOIN reimbursement_matches m ON m.payment_id=p.id LEFT JOIN bank_transactions b ON b.id=m.bank_transaction_id WHERE p.claim_id=? ORDER BY p.created_at,p.id",
+      c.id,
+    );
+    const total = items.reduce((n, s) => n + s.amount_minor, 0);
+    const paid = payments
+      .filter((p) => ["paid", "reconciled", "posted"].includes(p.status))
+      .reduce((n, p) => n + p.amount_minor, 0);
+    const scheduled = payments
+      .filter((p) => p.status === "scheduled")
+      .reduce((n, p) => n + p.amount_minor, 0);
+    return {
+      ...c,
+      items,
+      payments,
+      currency: items[0]?.currency,
+      total_minor: total,
+      reimbursed_minor: paid,
+      scheduled_minor: scheduled,
+      adjustment_minor: items.reduce((n, s) => n + s.adjustment_minor, 0),
+      effective_amount_minor: items.reduce(
+        (n, s) => n + s.effective_amount_minor,
+        0,
+      ),
+      recoverable_minor: items.reduce((n, s) => n + s.recoverable_minor, 0),
+      pending_adjustments: items.some((s) => s.pending_adjustments),
+      outstanding_minor:
+        c.status === "rejected"
+          ? 0
+          : items.reduce((n, s) => n + s.outstanding_minor, 0),
+      available_minor:
+        c.status === "approved" && !items.some((s) => s.pending_adjustments)
+          ? Math.max(
+              0,
+              items.reduce((n, s) => n + s.outstanding_minor, 0) - scheduled,
+            )
+          : 0,
+      settlement_status: items.every((s) => s.outstanding_minor === 0)
+        ? items.some((s) => s.adjustment_minor > 0)
+          ? "Settled after adjustment"
+          : "Reimbursed"
+        : paid > 0
+          ? "Partially reimbursed"
+          : c.status === "approved"
+            ? "Awaiting reimbursement"
+            : "Not yet approved",
+      history: this.all(
+        "SELECT a.*,u.name AS actor FROM audit a LEFT JOIN users u ON u.id=a.actor_id WHERE resource_id=? ORDER BY a.id",
+        c.id,
+      ),
+    };
+  }
+  reimbursements(a: Actor, entity: string) {
+    this.authorize(a, entity);
+    const claims = this.all(
+      "SELECT id,requester_id,claimant_id FROM reimbursement_claims WHERE entity_id=? ORDER BY created_at DESC",
+      entity,
+    )
+      .filter(
+        (c) =>
+          a.role !== "employee" ||
+          c.requester_id === a.id ||
+          c.claimant_id === a.id,
+      )
+      .map((c) => this.claim(a, c.id));
+    const personal = this.list(a, entity).filter(
+      (s) => s.payment_source !== "company" && s.kind !== "request",
+    );
+    const balances: Record<string, any> = {};
+    for (const s of personal) {
+      const person = (balances[s.paid_by_id] ||= {
+        person_id: s.paid_by_id,
+        name: this.actor(s.paid_by_id).name,
+        pending_minor: 0,
+        owed_minor: 0,
+        scheduled_minor: 0,
+        reimbursed_minor: 0,
+        recoverable_minor: 0,
+        oldest_date: null,
+      });
+      person.recoverable_minor += s.recoverable_minor;
+      const approved = [
+        "approved",
+        "scheduled",
+        "paid",
+        "reconciled",
+        "posted",
+      ].includes(s.status);
+      if (approved) {
+        person.owed_minor += s.outstanding_minor;
+        person.scheduled_minor += s.scheduled_minor || 0;
+        if (
+          s.outstanding_minor > 0 &&
+          (!person.oldest_date || s.date < person.oldest_date)
+        )
+          person.oldest_date = s.date;
+      } else if (s.status !== "rejected")
+        person.pending_minor += s.amount_minor;
+      person.reimbursed_minor += s.reimbursed_minor;
+    }
+    return {
+      claims,
+      balances: Object.values(balances),
+      eligible: personal.filter(
+        (s) =>
+          s.requester_id === a.id &&
+          !s.claim_id &&
+          ["draft", "returned"].includes(s.status),
+      ),
+    };
+  }
+  saveClaim(a: Actor, input: unknown, claimId?: string) {
+    const parsed = z
+      .object({
+        entity_id: z.enum(["ng", "inc"]),
+        title: z.string().trim().min(3).max(180),
+        spend_ids: z.array(z.string()).min(1).max(100),
+        expected_revision: z.number().int().optional(),
+      })
+      .strict()
+      .safeParse(input);
+    if (!parsed.success)
+      throw new DomainError("Provide a title and 1–100 expense IDs");
+    const v = parsed.data;
+    this.authorize(a, v.entity_id, ["employee", "manager", "finance", "cfo"]);
+    return this.tx(() => {
+      const existing = claimId ? this.claim(a, claimId) : null;
+      if (
+        existing &&
+        (existing.requester_id !== a.id ||
+          !["draft", "returned"].includes(existing.status))
+      )
+        throw new DomainError(
+          "Only the requester can edit draft or returned claims",
+          403,
+        );
+      if (
+        existing &&
+        (existing.revision !== v.expected_revision ||
+          existing.entity_id !== v.entity_id)
+      )
+        throw new DomainError("Claim changed. Reload before saving.", 409);
+      if (new Set(v.spend_ids).size !== v.spend_ids.length)
+        throw new DomainError("Each expense can appear only once");
+      const items = v.spend_ids.map((id) => this.spend(a, id));
+      const first = items[0];
+      for (const s of items) {
+        if (
+          s.entity_id !== v.entity_id ||
+          s.currency !== first.currency ||
+          s.paid_by_id !== first.paid_by_id ||
+          s.payment_source !== first.payment_source ||
+          s.payment_source === "company" ||
+          s.kind === "request" ||
+          s.requester_id !== a.id ||
+          !["draft", "returned"].includes(s.status)
+        )
+          throw new DomainError(
+            "Choose your draft personal expenses for one person, payment source, entity and currency",
+          );
+        if (s.claim_id && s.claim_id !== claimId)
+          throw new DomainError("An expense already belongs to another claim");
+      }
+      const key = claimId || id("CL");
+      if (existing) {
+        this.run(
+          "UPDATE reimbursement_claims SET title=?,claimant_id=?,revision=revision+1,updated_at=? WHERE id=?",
+          v.title,
+          first.paid_by_id,
+          now(),
+          key,
+        );
+        this.run("DELETE FROM reimbursement_items WHERE claim_id=?", key);
+      } else
+        this.run(
+          "INSERT INTO reimbursement_claims(id,entity_id,claimant_id,requester_id,title,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+          key,
+          v.entity_id,
+          first.paid_by_id,
+          a.id,
+          v.title,
+          now(),
+          now(),
+        );
+      for (const s of items)
+        this.run("INSERT INTO reimbursement_items VALUES(?,?)", key, s.id);
+      this.audit(
+        v.entity_id,
+        a,
+        existing ? "claim.edited" : "claim.created",
+        key,
+        {
+          title: v.title,
+          spend_ids: v.spend_ids,
+          previous_spend_ids: existing?.items.map((s: any) => s.id),
+        },
+      );
+      return this.claim(a, key);
+    });
+  }
+  claimAction(a: Actor, claimId: string, input: any) {
+    const p = z
+      .object({
+        action: z.enum(["submit", "approve", "return", "reject"]),
+        comment: z.string().max(1000).optional(),
+      })
+      .strict()
+      .safeParse(input);
+    if (!p.success) throw new DomainError("Invalid claim action");
+    return this.tx(() => {
+      const c = this.claim(a, claimId),
+        { action, comment } = p.data;
+      if (
+        ["submit"].includes(action) &&
+        !["draft", "returned"].includes(c.status)
+      )
+        throw new DomainError("Only draft or returned claims can be submitted");
+      if (
+        action !== "submit" &&
+        !["manager_review", "finance_review", "cfo_review"].includes(c.status)
+      )
+        throw new DomainError("Claim is not awaiting review");
+      for (const s of c.items) this.action(a, s.id, action, { comment }, c.id);
+      let status = this.spend(a, c.items[0].id).status;
+      if (action === "approve" && c.status === "finance_review") {
+        const threshold = this.get(
+          "SELECT cfo_threshold FROM policies WHERE entity_id=?",
+          c.entity_id,
+        ).cfo_threshold;
+        if (
+          c.total_minor >= threshold ||
+          c.items.some((s: any) => this.spend(a, s.id).status === "cfo_review")
+        ) {
+          status = "cfo_review";
+          for (const s of c.items)
+            this.run("UPDATE spends SET status='cfo_review' WHERE id=?", s.id);
+        }
+      }
+      this.run(
+        "UPDATE reimbursement_claims SET status=?,revision=revision+1,updated_at=? WHERE id=?",
+        status,
+        now(),
+        c.id,
+      );
+      this.audit(c.entity_id, a, `claim.${action}`, c.id, {
+        from: c.status,
+        to: status,
+        comment,
+        total_minor: c.total_minor,
+      });
+      return this.claim(a, c.id);
+    });
+  }
+  scheduleRepayment(a: Actor, claimId: string, input: unknown) {
+    const p = z
+      .object({
+        amount_minor: int,
+        date: optionalDate.refine((v) => !!v, "Payment date required"),
+      })
+      .strict()
+      .safeParse(input);
+    if (!p.success)
+      throw new DomainError(
+        "Enter a positive repayment amount and valid payment date",
+      );
+    return this.tx(() => {
+      const c = this.claim(a, claimId),
+        v = p.data;
+      this.authorize(a, c.entity_id, ["finance"]);
+      if (a.id === c.claimant_id || a.id === c.requester_id)
+        throw new DomainError(
+          "A separate finance person must schedule the reimbursement",
+          403,
+        );
+      if (
+        c.pending_adjustments ||
+        c.status !== "approved" ||
+        v.amount_minor > c.available_minor
+      )
+        throw new DomainError(
+          "Amount exceeds the approved, unscheduled balance",
+        );
+      // Recognize each approved expense once. Later repayments only reduce the payable.
+      for (const s of c.items)
+        this.postJournal(a, {
+          entity_id: c.entity_id,
+          date: s.date,
+          description: s.description,
+          source_id: s.id,
+          idempotency_key: `${s.id}:expense`,
+          approved_by: s.finance_id,
+          lines: [
+            {
+              account: categories[s.category],
+              debit: s.amount_minor,
+              credit: 0,
+            },
+            { account: "2100", debit: 0, credit: s.amount_minor },
+          ],
+        });
+      const key = id("RP");
+      this.run(
+        "INSERT INTO reimbursement_payments(id,claim_id,entity_id,amount_minor,date,scheduled_by,created_at) VALUES(?,?,?,?,?,?,?)",
+        key,
+        c.id,
+        c.entity_id,
+        v.amount_minor,
+        v.date,
+        a.id,
+        now(),
+      );
+      let remaining = v.amount_minor;
+      for (const s of c.items) {
+        const reserved = this.get(
+          "SELECT COALESCE(SUM(a.amount_minor),0) AS total FROM reimbursement_allocations a JOIN reimbursement_payments p ON p.id=a.payment_id WHERE a.spend_id=? AND p.status<>'cancelled'",
+          s.id,
+        ).total;
+        const amount = Math.min(
+          remaining,
+          Math.max(0, s.effective_amount_minor - reserved),
+        );
+        if (amount > 0) {
+          this.run(
+            "INSERT INTO reimbursement_allocations VALUES(?,?,?)",
+            key,
+            s.id,
+            amount,
+          );
+          remaining -= amount;
+        }
+      }
+      if (remaining !== 0) throw new DomainError("Repayment allocation failed");
+      this.audit(c.entity_id, a, "claim.repayment_scheduled", c.id, {
+        payment_id: key,
+        ...v,
+      });
+      return this.claim(a, c.id);
+    });
+  }
+  repaymentAction(a: Actor, paymentId: string, input: unknown) {
+    const p = z
+      .object({
+        action: z.enum(["cancel", "confirm", "reconcile", "post"]),
+        reference: z.string().trim().min(1).max(120).optional(),
+      })
+      .strict()
+      .safeParse(input);
+    if (!p.success) throw new DomainError("Invalid repayment action");
+    return this.tx(() => {
+      const pay = this.get(
+        "SELECT * FROM reimbursement_payments WHERE id=?",
+        paymentId,
+      );
+      if (!pay) throw new DomainError("Repayment not found", 404);
+      const c = this.claim(a, pay.claim_id),
+        { action, reference } = p.data;
+      this.authorize(
+        a,
+        c.entity_id,
+        action === "confirm"
+          ? ["payer"]
+          : action === "reconcile"
+            ? ["reconciler"]
+            : ["finance"],
+      );
+      const reviewers = c.items.flatMap((s: any) => [
+        s.requester_id,
+        s.manager_id,
+        s.finance_id,
+        s.cfo_id,
+      ]);
+      if (
+        a.id === c.claimant_id ||
+        a.id === c.requester_id ||
+        (["confirm", "reconcile"].includes(action) &&
+          [...reviewers, pay.scheduled_by, pay.payer_id].includes(a.id))
+      )
+        throw new DomainError(
+          "Separation of duties: beneficiary, reviewers, releaser and reconciler must differ",
+          403,
+        );
+      const expected = {
+        cancel: "scheduled",
+        confirm: "scheduled",
+        reconcile: "paid",
+        post: "reconciled",
+      }[action];
+      if (pay.status !== expected)
+        throw new DomainError("Repayment is not ready for this action");
+      let status = "";
+      if (action === "cancel") status = "cancelled";
+      if (action === "confirm") {
+        if (!reference) throw new DomainError("Provide the bank reference");
+        if (
+          this.get(
+            "SELECT id FROM spends WHERE entity_id=? AND payment_reference=?",
+            c.entity_id,
+            reference,
+          ) ||
+          this.get(
+            "SELECT id FROM reimbursement_payments WHERE entity_id=? AND reference=?",
+            c.entity_id,
+            reference,
+          )
+        )
+          throw new DomainError("Payment reference has already been used");
+        if (
+          this.get(
+            "SELECT id FROM (SELECT id,entity_id,reference FROM bookkeeping_payments UNION ALL SELECT id,entity_id,reference FROM bookkeeping_refunds) WHERE entity_id=? AND reference=?",
+            c.entity_id,
+            reference,
+          )
+        )
+          throw new DomainError("Payment reference has already been used");
+        this.run(
+          "UPDATE reimbursement_payments SET payer_id=?,reference=? WHERE id=?",
+          a.id,
+          reference,
+          pay.id,
+        );
+        status = "paid";
+      }
+      if (action === "reconcile") {
+        if (!reference)
+          throw new DomainError("Select an imported statement reference");
+        const bank = this.get(
+          "SELECT * FROM bank_transactions WHERE entity_id=? AND reference=?",
+          c.entity_id,
+          reference,
+        );
+        if (
+          !bank ||
+          bank.direction !== "debit" ||
+          bank.matched_spend_id ||
+          this.get(
+            "SELECT bank_transaction_id FROM bookkeeping_bank_matches WHERE bank_transaction_id=?",
+            bank.id,
+          ) ||
+          bank.currency !== c.currency ||
+          bank.amount_minor !== pay.amount_minor ||
+          this.get(
+            "SELECT payment_id FROM reimbursement_matches WHERE bank_transaction_id=?",
+            bank.id,
+          )
+        )
+          throw new DomainError(
+            "Use an unmatched statement debit with the exact entity, currency and repayment amount",
+          );
+        this.run(
+          "INSERT INTO reimbursement_matches VALUES(?,?)",
+          bank.id,
+          pay.id,
+        );
+        this.run(
+          "UPDATE reimbursement_payments SET reconciler_id=? WHERE id=?",
+          a.id,
+          pay.id,
+        );
+        status = "reconciled";
+      }
+      if (action === "post") {
+        const allocations = this.all(
+          "SELECT * FROM reimbursement_allocations WHERE payment_id=?",
+          pay.id,
+        );
+        for (const row of allocations) {
+          const s = c.items.find((s: any) => s.id === row.spend_id)!;
+          this.postJournal(a, {
+            entity_id: c.entity_id,
+            date: pay.date,
+            description: `Reimbursement · ${c.title}`,
+            source_id: s.id,
+            idempotency_key: `${pay.id}:${s.id}:settlement`,
+            approved_by: s.finance_id,
+            lines: [
+              { account: "2100", debit: row.amount_minor, credit: 0 },
+              { account: "1100", debit: 0, credit: row.amount_minor },
+            ],
+          });
+        }
+        status = "posted";
+      }
+      this.run(
+        "UPDATE reimbursement_payments SET status=? WHERE id=?",
+        status,
+        pay.id,
+      );
+      if (status === "posted")
+        for (const s of c.items) {
+          const total = this.get(
+            "SELECT COALESCE(SUM(a.amount_minor),0) AS total FROM reimbursement_allocations a JOIN reimbursement_payments p ON p.id=a.payment_id WHERE a.spend_id=? AND p.status='posted'",
+            s.id,
+          ).total;
+          if (total >= s.effective_amount_minor)
+            this.run(
+              "UPDATE spends SET status='posted',updated_at=? WHERE id=?",
+              now(),
+              s.id,
+            );
+        }
+      this.audit(c.entity_id, a, `claim.repayment_${action}`, c.id, {
+        payment_id: pay.id,
+        amount_minor: pay.amount_minor,
+        reference,
+      });
+      return this.claim(a, c.id);
+    });
+  }
+
   warnings(s: any) {
     const out: string[] = [];
     if (
@@ -438,8 +1300,12 @@ export class FinanceStore {
       throw new DomainError(
         "File signature must match PDF, PNG or JPEG MIME type",
       );
-    const attached=this.get('SELECT id FROM receipts WHERE spend_id=? AND hash=?',s.id,hash(b));
-    if(attached)return {id:attached.id};
+    const attached = this.get(
+      "SELECT id FROM receipts WHERE spend_id=? AND hash=?",
+      s.id,
+      hash(b),
+    );
+    if (attached) return { id: attached.id };
     return this.tx(() => {
       const rid = id("RC"),
         path = join(this.dir, `${rid}.enc`),
@@ -499,9 +1365,14 @@ export class FinanceStore {
     spendId: string,
     action: string,
     input: { comment?: string; reference?: string } = {},
+    claimContext?: string,
   ) {
     return this.tx(() => {
       const s = this.spend(a, spendId);
+      if (s.claim_id && s.claim_id !== claimContext)
+        throw new DomainError(
+          "Manage this expense through its reimbursement claim",
+        );
       const roles: Record<string, string[]> = {
         submit: ["employee", "manager", "finance", "cfo"],
         approve: ["manager", "finance", "cfo"],
@@ -518,6 +1389,7 @@ export class FinanceStore {
       const updates: Record<string, any> = {};
       const allActors = [
         s.requester_id,
+        s.paid_by_id,
         s.manager_id,
         s.finance_id,
         s.cfo_id,
@@ -527,7 +1399,11 @@ export class FinanceStore {
       if (
         action !== "submit" &&
         allActors.includes(a.id) &&
-        !(["post", "schedule"].includes(action) && a.id === s.finance_id)
+        !(
+          ["post", "schedule"].includes(action) &&
+          a.id === s.finance_id &&
+          a.id !== s.paid_by_id
+        )
       )
         throw new DomainError(
           "Separation of duties: requester, reviewers, payer and reconciler must be different people",
@@ -598,6 +1474,12 @@ export class FinanceStore {
           throw new DomainError(
             "Only approved expenses or bills can enter a payment run",
           );
+        if (this.pendingAdjustment(s.id))
+          throw new DomainError(
+            "Resolve the pending credit note or personal refund before scheduling payment",
+          );
+        if (s.effective_amount_minor <= 0)
+          throw new DomainError("This expense has no amount left to pay");
         if (!this.get("SELECT id FROM receipts WHERE spend_id=?", s.id))
           throw new DomainError("Evidence is required");
         next = "scheduled";
@@ -610,6 +1492,31 @@ export class FinanceStore {
           throw new DomainError(
             "A synthetic bank confirmation reference is required",
           );
+        if (
+          s.payment_source === "company" &&
+          s.original_paid_date &&
+          input.reference.trim() !== s.original_payment_reference
+        )
+          throw new DomainError(
+            "Verify the recorded company payment using its original reference; do not pay it again",
+          );
+        if (
+          this.get(
+            "SELECT id FROM reimbursement_payments WHERE entity_id=? AND reference=?",
+            s.entity_id,
+            input.reference.trim(),
+          )
+        )
+          throw new DomainError("Payment reference has already been used");
+        if (
+          this.get(
+            "SELECT id FROM (SELECT id,entity_id,reference FROM bookkeeping_payments UNION ALL SELECT id,entity_id,reference FROM bookkeeping_refunds) WHERE entity_id=? AND reference=?",
+            s.entity_id,
+            input.reference.trim(),
+          )
+        )
+          throw new DomainError("Payment reference has already been used");
+        updates.payment_amount_minor = s.effective_amount_minor;
         updates.payment_reference = input.reference.trim();
         updates.payer_id = a.id;
         next = "paid";
@@ -625,9 +1532,19 @@ export class FinanceStore {
         );
         if (
           !row ||
+          row.direction !== "debit" ||
           row.matched_spend_id ||
+          this.get(
+            "SELECT bank_transaction_id FROM bookkeeping_bank_matches WHERE bank_transaction_id=?",
+            row.id,
+          ) ||
+          this.get(
+            "SELECT payment_id FROM reimbursement_matches WHERE bank_transaction_id=?",
+            row.id,
+          ) ||
           row.currency !== s.currency ||
-          row.amount_minor !== s.amount_minor
+          row.amount_minor !==
+            (s.payment_amount_minor ?? s.effective_amount_minor)
         )
           throw new DomainError(
             "Import an unmatched statement debit with the same entity, currency and amount before reconciling",
@@ -664,8 +1581,16 @@ export class FinanceStore {
           idempotency_key: `${s.id}:settlement`,
           approved_by: s.finance_id,
           lines: [
-            { account: "2100", debit: s.amount_minor, credit: 0 },
-            { account: "1100", debit: 0, credit: s.amount_minor },
+            {
+              account: "2100",
+              debit: s.payment_amount_minor ?? s.effective_amount_minor,
+              credit: 0,
+            },
+            {
+              account: "1100",
+              debit: 0,
+              credit: s.payment_amount_minor ?? s.effective_amount_minor,
+            },
           ],
         });
         next = "posted";
@@ -799,12 +1724,34 @@ export class FinanceStore {
   }
   budgetsRaw(entity: string) {
     return this.all(
-      `SELECT b.*,COALESCE((SELECT SUM(s.amount_minor) FROM spends s WHERE s.entity_id=b.entity_id AND s.department=b.department AND s.category=b.category AND substr(s.date,1,7)=b.period AND s.status IN ('approved','scheduled','paid','reconciled') AND NOT EXISTS(SELECT 1 FROM spends child WHERE child.parent_id=s.id AND child.status IN ('approved','scheduled','paid','reconciled','posted'))),0) AS committed_minor,COALESCE((SELECT SUM(s.amount_minor) FROM spends s WHERE s.entity_id=b.entity_id AND s.department=b.department AND s.category=b.category AND substr(s.date,1,7)=b.period AND s.status='posted'),0) AS actual_minor FROM budgets b WHERE b.entity_id=?`,
+      `SELECT b.*,COALESCE((SELECT SUM(s.amount_minor) FROM spends s WHERE s.entity_id=b.entity_id AND s.department=b.department AND s.category=b.category AND substr(s.date,1,7)=b.period AND s.status IN ('approved','scheduled','paid','reconciled') AND NOT EXISTS(SELECT 1 FROM journals j WHERE j.source_id=s.id AND j.idempotency_key=s.id||':expense' AND j.status='posted') AND NOT EXISTS(SELECT 1 FROM spends child WHERE child.parent_id=s.id AND child.status IN ('approved','scheduled','paid','reconciled','posted'))),0) AS committed_minor,COALESCE((SELECT SUM(l.debit-l.credit) FROM lines l JOIN journals j ON j.id=l.journal_id JOIN spends s ON s.id=j.source_id JOIN accounts a ON a.entity_id=l.entity_id AND a.code=l.account WHERE s.entity_id=b.entity_id AND s.department=b.department AND s.category=b.category AND substr(j.date,1,7)=b.period AND j.status='posted' AND a.type='expense'),0) AS actual_minor FROM budgets b WHERE b.entity_id=?`,
       entity,
-    ).map((b) => ({
-      ...b,
-      remaining_minor: b.amount_minor - b.committed_minor - b.actual_minor,
-    }));
+    ).map((b) => {
+      const recorded = this.get(
+        "SELECT COALESCE(SUM(amount_minor),0) AS total FROM bookkeeping_records WHERE entity_id=? AND department=? AND category=? AND substr(date,1,7)=? AND voided=0",
+        entity,
+        b.department,
+        b.category,
+        b.period,
+      ).total;
+      const refunded = this.get(
+        "SELECT COALESCE(SUM(f.amount_minor),0) AS total FROM bookkeeping_refunds f JOIN bookkeeping_records r ON r.id=f.record_id WHERE f.entity_id=? AND r.department=? AND r.category=? AND substr(f.date,1,7)=? AND f.voided=0",
+        entity,
+        b.department,
+        b.category,
+        b.period,
+      ).total;
+      return {
+        ...b,
+        actual_minor: b.actual_minor + recorded - refunded,
+        remaining_minor:
+          b.amount_minor -
+          b.committed_minor -
+          b.actual_minor -
+          recorded +
+          refunded,
+      };
+    });
   }
   budgets(a: Actor, entity: string) {
     this.authorize(a, entity, ["manager", "finance", "cfo", "auditor"]);
@@ -833,6 +1780,16 @@ export class FinanceStore {
     return this.tx(() => {
       const v = p.data,
         vid = id("VN");
+      if (
+        this.get(
+          "SELECT id FROM vendors WHERE entity_id=? AND lower(trim(name))=lower(?)",
+          v.entity_id,
+          v.name,
+        )
+      )
+        throw new DomainError(
+          "This vendor is already saved. Select the existing vendor in Expenses.",
+        );
       this.run(
         "INSERT INTO vendors VALUES(?,?,?,?,?,?)",
         vid,
@@ -857,24 +1814,42 @@ export class FinanceStore {
     ]);
     const spends = this.list(a, entity);
     const totals = this.get(
-      "SELECT COALESCE(SUM(CASE WHEN account='1100' THEN debit-credit ELSE 0 END),0) AS cash_minor,COALESCE(SUM(CASE WHEN account LIKE '6%' THEN debit-credit ELSE 0 END),0) AS spend_minor FROM lines WHERE entity_id=? AND journal_id IN (SELECT id FROM journals WHERE status='posted')",
+      "SELECT COALESCE(SUM(CASE WHEN account IN ('1100','1010') THEN debit-credit ELSE 0 END),0) AS cash_minor,COALESCE(SUM(CASE WHEN account LIKE '6%' THEN debit-credit ELSE 0 END),0) AS spend_minor FROM lines WHERE entity_id=? AND journal_id IN (SELECT id FROM journals WHERE status='posted')",
       entity,
     );
     const budgets = this.budgetsRaw(entity);
+    const documented = this.all(
+      "SELECT r.*,r.amount_minor-COALESCE((SELECT SUM(f.amount_minor) FROM bookkeeping_refunds f WHERE f.record_id=r.id AND f.voided=0),0) AS amount_minor,r.amount_minor-COALESCE((SELECT SUM(p.amount_minor) FROM bookkeeping_payments p WHERE p.record_id=r.id AND p.voided=0),0) AS outstanding_minor FROM bookkeeping_records r WHERE r.entity_id=? AND r.voided=0 ORDER BY r.date DESC,r.created_at DESC",
+      entity,
+    );
     return {
+      documented_recent: documented.slice(0, 6),
+      record_summary: {
+        owed_minor: documented.reduce((n, r) => n + r.outstanding_minor, 0),
+        salary_owed_minor: documented
+          .filter((r) => r.kind === "salary")
+          .reduce((n, r) => n + r.outstanding_minor, 0),
+      },
       ...totals,
       pending: spends.filter((s) =>
         ["manager_review", "finance_review", "cfo_review"].includes(s.status),
       ).length,
       committed_minor: budgets.reduce((n, b) => n + b.committed_minor, 0),
       budget_minor: budgets.reduce((n, b) => n + b.amount_minor, 0),
-      unreconciled: spends.filter((s) => s.status === "paid").length,
+      unreconciled:
+        spends.filter((s) => s.status === "paid").length +
+        this.get(
+          "SELECT COUNT(*) AS n FROM reimbursement_payments WHERE entity_id=? AND status='paid'",
+          entity,
+        ).n,
       recent: spends.slice(0, 6),
       by_category: Object.keys(categories).map((category) => ({
         category,
-        amount_minor: spends
-          .filter((s) => s.category === category && s.status === "posted")
-          .reduce((n, s) => n + s.amount_minor, 0),
+        amount_minor: this.get(
+          "SELECT COALESCE(SUM(debit-credit),0) AS total FROM lines WHERE entity_id=? AND account=? AND journal_id IN (SELECT id FROM journals WHERE status='posted')",
+          entity,
+          categories[category],
+        ).total,
       })),
       activity: this.all(
         "SELECT a.*,u.name AS actor FROM audit a JOIN users u ON u.id=a.actor_id WHERE entity_id=? ORDER BY a.id DESC LIMIT 6",
@@ -895,7 +1870,7 @@ export class FinanceStore {
   bankTransactions(a: Actor, entity: string) {
     this.authorize(a, entity, ["finance", "reconciler", "auditor", "cfo"]);
     return this.all(
-      "SELECT * FROM bank_transactions WHERE entity_id=? ORDER BY date DESC",
+      "SELECT b.*,m.payment_id AS matched_repayment_id,r.id AS matched_refund_id,rc.id AS matched_recovery_id,bm.payment_id AS matched_record_payment_id,bm.refund_id AS matched_record_refund_id FROM bank_transactions b LEFT JOIN reimbursement_matches m ON m.bank_transaction_id=b.id LEFT JOIN refunds r ON r.bank_transaction_id=b.id LEFT JOIN recovery_payments rc ON rc.bank_transaction_id=b.id LEFT JOIN bookkeeping_bank_matches bm ON bm.bank_transaction_id=b.id WHERE b.entity_id=? ORDER BY b.date DESC",
       entity,
     );
   }
@@ -926,16 +1901,24 @@ export class FinanceStore {
         const p = z
           .object({
             reference: z.string().min(1).max(120),
-            date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+            date: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/)
+              .refine(
+                (v) =>
+                  !isNaN(Date.parse(v)) &&
+                  new Date(v).toISOString().slice(0, 10) === v,
+              ),
             currency: z.literal(currency),
             amount_minor: z.string().regex(/^[1-9]\d{0,11}$/),
             description: z.string().max(300),
+            direction: z.enum(["debit", "credit"]).default("debit"),
           })
           .strict()
           .safeParse(row);
         if (!p.success)
           throw new DomainError(
-            "CSV columns: reference,date,currency,amount_minor,description. Use positive integer minor units for debit amounts in entity currency.",
+            "CSV columns: reference,date,currency,amount_minor,description. Optional direction: debit or credit (defaults to debit). Use positive integer minor units in entity currency.",
           );
         const r = p.data,
           existing = this.get(
@@ -945,6 +1928,7 @@ export class FinanceStore {
           );
         if (existing) {
           if (
+            existing.direction !== r.direction ||
             existing.amount_minor !== Number(r.amount_minor) ||
             existing.currency !== r.currency ||
             existing.date !== r.date ||
@@ -956,7 +1940,7 @@ export class FinanceStore {
           continue;
         }
         this.run(
-          "INSERT INTO bank_transactions VALUES(?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO bank_transactions(id,entity_id,reference,date,currency,amount_minor,description,matched_spend_id,imported_by,created_at,direction) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
           id("BT"),
           entity,
           r.reference,
@@ -967,6 +1951,7 @@ export class FinanceStore {
           null,
           a.id,
           now(),
+          r.direction,
         );
         added++;
       }
@@ -981,8 +1966,14 @@ export class FinanceStore {
   paymentFile(a: Actor, entity: string) {
     this.authorize(a, entity, ["finance", "payer"]);
     const rows = this.all(
-      "SELECT s.id,s.currency,s.amount_minor,s.description,v.name AS payee FROM spends s JOIN vendors v ON v.id=s.vendor_id WHERE s.entity_id=? AND s.status='scheduled'",
+      "SELECT s.id,s.currency,(s.amount_minor-COALESCE((SELECT SUM(amount_minor) FROM expense_adjustments WHERE spend_id=s.id AND status='posted'),0)) AS amount_minor,s.description,CASE WHEN s.payment_source='company' THEN v.name ELSE u.name END AS payee FROM spends s JOIN vendors v ON v.id=s.vendor_id LEFT JOIN users u ON u.id=s.paid_by_id WHERE s.entity_id=? AND s.status='scheduled' AND NOT EXISTS(SELECT 1 FROM reimbursement_items i WHERE i.spend_id=s.id) AND NOT(s.payment_source='company' AND s.original_paid_date<>'')",
       entity,
+    );
+    rows.push(
+      ...this.all(
+        "SELECT p.id,e.currency,p.amount_minor,c.title AS description,u.name AS payee FROM reimbursement_payments p JOIN reimbursement_claims c ON c.id=p.claim_id JOIN users u ON u.id=c.claimant_id JOIN entities e ON e.id=p.entity_id WHERE p.entity_id=? AND p.status='scheduled'",
+        entity,
+      ),
     );
     this.audit(entity, a, "payment.test_file_exported", entity, {
       count: rows.length,
@@ -998,6 +1989,47 @@ export class FinanceStore {
         r.description,
       ]),
     );
+  }
+  seedEmpty() {
+    this.tx(() => {
+      for (const entity of [
+        ["inc", "GoJaye Inc.", "USD", "United States"],
+        ["ng", "GoJaye Nigeria Ltd", "NGN", "Nigeria"],
+      ].filter((e) => !this.workspaceEntity || e[0] === this.workspaceEntity)) {
+        this.run("INSERT INTO entities VALUES(?,?,?,?)", ...entity);
+        this.run("INSERT INTO policies VALUES(?,?,80)", entity[0], 1);
+        this.run(
+          "INSERT INTO periods VALUES(?,?,'open')",
+          entity[0],
+          new Date().toISOString().slice(0, 7),
+        );
+        for (const account of [
+          ["1100", "Bank · operating", "asset"],
+          ["1200", "Refunds recoverable from employees & founders", "asset"],
+          ["2100", "Employee & vendor payables", "liability"],
+          ["3100", "Opening capital", "equity"],
+          ...Object.entries(categories).map(([name, code]) => [
+            code,
+            name,
+            "expense",
+          ]),
+        ])
+          this.run(
+            "INSERT INTO accounts(entity_id,code,name,type) VALUES(?,?,?,?)",
+            entity[0],
+            ...account,
+          );
+      }
+      this.run(
+        "INSERT INTO users VALUES(?,?,?,?)",
+        "finance",
+        "Workspace owner",
+        "finance",
+        JSON.stringify(
+          this.workspaceEntity ? [this.workspaceEntity] : ["inc", "ng"],
+        ),
+      );
+    });
   }
   seed() {
     this.tx(() => {
@@ -1245,7 +2277,7 @@ export class FinanceStore {
           }
           if (status === "paid")
             this.run(
-              "INSERT OR IGNORE INTO bank_transactions VALUES(?,?,?,?,?,?,?,?,?,?)",
+              "INSERT OR IGNORE INTO bank_transactions(id,entity_id,reference,date,currency,amount_minor,description,matched_spend_id,imported_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
               `BT-${sid}`,
               e,
               `SYNTH-STMT-${sid}`,
@@ -1295,7 +2327,13 @@ export class FinanceStore {
 export function csv(headers: string[], rows: any[][]) {
   const cell = (v: any) => {
     let s = String(v ?? "");
-    if (/^[=+@\-\t\r]/.test(s)) s = "'" + s;
+    // Finite numbers are safe numeric cells; keep credit balances usable in spreadsheets.
+    // Text retains formula protection even when it starts with a minus sign.
+    if (
+      !(typeof v === "number" && Number.isFinite(v)) &&
+      /^[=+@\-\t\r]/.test(s)
+    )
+      s = "'" + s;
     return '"' + s.replace(/"/g, '""') + '"';
   };
   return [headers, ...rows].map((r) => r.map(cell).join(",")).join("\r\n");

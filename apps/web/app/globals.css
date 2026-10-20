@@ -2658,8 +2658,339 @@ code {
   font-size: 11px;
 }
 /* Keep off-screen mobile navigation out of the keyboard/accessibility order. */
-.sidebar { overflow-y: auto; }
+.sidebar {
+  overflow-y: auto;
+}
 @media (max-width: 760px) {
-  .sidebar { visibility: hidden; }
-  .sidebar.open { visibility: visible; }
+  .sidebar {
+    visibility: hidden;
+  }
+  .sidebar.open {
+    visibility: visible;
+  }
+}
+
+/* Expense capture and settlement */
+.expense-subline {
+  display: block;
+  color: var(--muted, #65746d);
+  font-size: 11px;
+  margin-top: 6px;
+}
+.expense-filters {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e8ede9;
+}
+.expense-filters label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: #43564b;
+}
+.expense-filters select,
+.expense-filters input {
+  border: 1px solid #dbe4dd;
+  border-radius: 8px;
+  padding: 9px;
+  background: white;
+  min-width: 130px;
+}
+.payment-fields {
+  border: 1px solid #dbe4dd;
+  border-radius: 12px;
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+}
+.payment-fields legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+.timeline details {
+  font-size: 12px;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .expense-filters label {
+    flex: 1 1 40%;
+  }
+  .expense-filters input,
+  .expense-filters select {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+.reimbursements {
+  display: grid;
+  gap: 24px;
+}
+.reimbursement-panel {
+  padding: 24px;
+}
+.reimbursement-panel .panel-heading {
+  padding: 0 0 20px;
+}
+.reimbursement-panel h3 {
+  margin: 24px 0 12px;
+}
+.reimbursement-panel .action-buttons {
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+.reimbursement-panel .form {
+  margin-top: 20px;
+}
+.claim-link {
+  background: none;
+  border: none;
+  color: #315b42;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.claim-totals {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  padding: 18px;
+  background: #f4f7f0;
+  border-radius: 10px;
+}
+.claim-totals span {
+  display: grid;
+  gap: 8px;
+  color: #526154;
+  font-size: 12px;
+}
+.claim-totals strong {
+  color: #243d2c;
+  font-size: 18px;
+}
+.claim-items {
+  border: 1px solid #dbe4dd;
+  border-radius: 10px;
+  padding: 16px;
+}
+.claim-items .claim-checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+}
+.claim-checkbox input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+.claim-checkbox span {
+  display: grid;
+  gap: 6px;
+}
+.claim-checkbox small {
+  color: #65746d;
+}
+.repayment-card {
+  border: 1px solid #dbe4dd;
+  border-radius: 10px;
+  padding: 16px;
+  margin: 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.repayment-card > div:first-child {
+  display: grid;
+  gap: 8px;
+  margin-right: auto;
+}
+.repayment-card small {
+  color: #65746d;
+}
+.repayment-actions {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.repayment-actions label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+.repayment-actions input,
+.repayment-actions select {
+  padding: 10px;
+  border: 1px solid #dbe4dd;
+  border-radius: 8px;
+  max-width: 100%;
+}
+.claim-history {
+  margin-top: 24px;
+  font-size: 12px;
+}
+.claim-history p {
+  margin-top: 12px;
+}
+@media (max-width: 700px) {
+  .claim-totals {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .reimbursement-panel {
+    padding: 16px;
+  }
+  .reimbursement-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .repayment-actions,
+  .repayment-actions label {
+    width: 100%;
+  }
+}
+
+.subscriptions {
+  display: grid;
+  gap: 24px;
+}
+.subscription-alerts {
+  padding: 20px 24px;
+  background: #faf8f0;
+}
+.subscription-alerts ul {
+  padding-left: 18px;
+  margin: 14px 0 0;
+  font-size: 13px;
+}
+.subscription-alerts li {
+  margin: 8px 0;
+  color: #59604f;
+}
+.subscription-check {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 10px;
+}
+.subscription-check input {
+  width: 18px;
+  height: 18px;
+}
+.subscription-actions {
+  flex-wrap: wrap;
+}
+.subscription-actions label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+.subscription-actions input {
+  border: 1px solid #dbe4dd;
+  border-radius: 8px;
+  padding: 8px;
+}
+.subscription-invoice {
+  padding: 20px;
+  background: #f6f8f3;
+  border-radius: 12px;
+}
+@media (max-width: 700px) {
+  .subscription-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .subscription-metrics .metric-value {
+    font-size: 23px;
+  }
+  .subscription-invoice {
+    padding: 12px;
+  }
+}
+
+.operational-reports {
+  margin-bottom: 24px;
+}
+.reporting-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.reporting-metrics .metric-value {
+  display: block;
+  margin: 12px 0;
+  font-size: 27px;
+}
+.report-explanation {
+  padding: 18px 24px;
+  color: var(--muted, #656b73);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.report-link {
+  color: #166657;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.operational-reports td small {
+  display: block;
+  margin-top: 5px;
+  color: #68716b;
+}
+.forecast-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+}
+.operational-reports select,
+.refund-form input {
+  border: 1px solid #dce1dc;
+  border-radius: 7px;
+  padding: 9px;
+  background: white;
+  color: #243e32;
+  max-width: 100%;
+}
+.refund-form {
+  margin: 0 24px 24px;
+  padding: 20px;
+  border: 1px solid #dce1dc;
+  border-radius: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.refund-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 13px;
+}
+.refund-form p {
+  grid-column: 1/-1;
+  font-size: 12px;
+  color: #68716b;
+}
+.operational-reports .report-tabs {
+  flex-wrap: wrap;
+}
+@media (max-width: 700px) {
+  .reporting-metrics,
+  .refund-form {
+    grid-template-columns: 1fr;
+  }
+  .report-explanation {
+    padding: 16px;
+  }
 }

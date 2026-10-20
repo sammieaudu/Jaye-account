@@ -510,4 +510,299 @@ test("resubmission resets the approval cycle while preserving earlier review his
   );
 });
 
-test('receipt upload retries return the existing evidence without creating a false self-duplicate',t=>{const s=fixture(t),c=claim(s);evidence(s,c.id);evidence(s,c.id);assert.equal(s.get('SELECT COUNT(*) AS n FROM receipts WHERE spend_id=?',c.id).n,1);s.action(s.actor('employee'),c.id,'submit');assert.equal(s.spend(s.actor('employee'),c.id).status,'manager_review');});
+test("receipt upload retries return the existing evidence without creating a false self-duplicate", (t) => {
+  const s = fixture(t),
+    c = claim(s);
+  evidence(s, c.id);
+  evidence(s, c.id);
+  assert.equal(
+    s.get("SELECT COUNT(*) AS n FROM receipts WHERE spend_id=?", c.id).n,
+    1,
+  );
+  s.action(s.actor("employee"), c.id, "submit");
+  assert.equal(s.spend(s.actor("employee"), c.id).status, "manager_review");
+});
+
+function editable(c: any, changes: any = {}) {
+  const keys = [
+    "entity_id",
+    "kind",
+    "vendor_id",
+    "description",
+    "purpose",
+    "amount_minor",
+    "currency",
+    "department",
+    "category",
+    "date",
+    "payment_source",
+    "paid_by_id",
+    "original_paid_date",
+    "original_payment_reference",
+    "payment_method",
+    "payment_account",
+    "invoice_date",
+    "due_date",
+  ];
+  return {
+    ...Object.fromEntries(keys.map((k) => [k, c[k]])),
+    ...(c.invoice_number ? { invoice_number: c.invoice_number } : {}),
+    ...(c.parent_id ? { parent_id: c.parent_id } : {}),
+    expected_revision: c.revision,
+    ...changes,
+  };
+}
+test("personal purchase remains owed until reimbursement; export names the person and posting counts expense once", (t) => {
+  const s = fixture(t),
+    c = claim(s, {
+      payment_source: "employee",
+      paid_by_id: "employee",
+      original_paid_date: "2026-10-19",
+      payment_method: "card",
+    });
+  assert.equal(c.settlement_status, "Reimbursement pending approval");
+  evidence(s, c.id);
+  approve(s, c.id);
+  assert.equal(
+    s.spend(s.actor("finance"), c.id).settlement_status,
+    "Reimbursement due",
+  );
+  s.action(s.actor("finance"), c.id, "schedule");
+  assert.match(s.paymentFile(s.actor("finance"), "ng"), /Ada Okafor/);
+  s.action(s.actor("payer"), c.id, "confirm", { reference: "PERSONAL-001" });
+  assert.equal(s.spend(s.actor("finance"), c.id).outstanding_minor, 0);
+  assert.equal(
+    s.spend(s.actor("finance"), c.id).settlement_status,
+    "Reimbursed",
+  );
+  statement(s, c);
+  s.action(s.actor("reconciler"), c.id, "reconcile", {
+    reference: "TEST-STMT-001",
+  });
+  s.action(s.actor("finance"), c.id, "post");
+  assert.equal(
+    s.get(
+      "SELECT SUM(l.debit) AS total FROM lines l JOIN journals j ON l.journal_id=j.id WHERE j.source_id=? AND l.account=?",
+      c.id,
+      "6300",
+    ).total,
+    c.amount_minor,
+  );
+});
+test("draft editing preserves evidence, audits changes, rejects stale writes and locks submitted records", (t) => {
+  const s = fixture(t),
+    c = claim(s);
+  evidence(s, c.id);
+  const edited = s.updateSpend(
+    s.actor("employee"),
+    c.id,
+    editable(c, {
+      description: "Updated business expense",
+      amount_minor: 234567,
+    }),
+  );
+  assert.equal(edited.revision, 1);
+  assert.equal(s.details(s.actor("employee"), c.id).receipts.length, 1);
+  assert.throws(
+    () => s.updateSpend(s.actor("employee"), c.id, editable(c)),
+    /changed/,
+  );
+  assert.throws(
+    () => s.updateSpend(s.actor("finance"), c.id, editable(edited)),
+    /Only the requester/,
+  );
+  s.action(s.actor("employee"), c.id, "submit");
+  assert.throws(
+    () => s.updateSpend(s.actor("employee"), c.id, editable(edited)),
+    /Only the requester/,
+  );
+  s.action(s.actor("manager"), c.id, "return", { comment: "Clarify purchase" });
+  s.updateSpend(
+    s.actor("employee"),
+    c.id,
+    editable(edited, { purpose: "Updated purpose after manager review" }),
+  );
+  assert.equal(s.verifyAudit(), true);
+  assert.match(
+    s.get(
+      "SELECT details FROM audit WHERE resource_id=? AND action='spend.edited' ORDER BY id LIMIT 1",
+      c.id,
+    ).details,
+    /234567/,
+  );
+});
+test("already-paid company purchase cannot enter export or confirm a different reference", (t) => {
+  const s = fixture(t),
+    c = claim(s, {
+      original_paid_date: "2026-10-19",
+      original_payment_reference: "EXISTING-001",
+      payment_method: "bank_transfer",
+    });
+  evidence(s, c.id);
+  approve(s, c.id);
+  s.action(s.actor("finance"), c.id, "schedule");
+  assert.ok(!s.paymentFile(s.actor("finance"), "ng").includes(c.id));
+  assert.throws(
+    () =>
+      s.action(s.actor("payer"), c.id, "confirm", {
+        reference: "SECOND-PAYMENT",
+      }),
+    /original reference/,
+  );
+  s.action(s.actor("payer"), c.id, "confirm", { reference: "EXISTING-001" });
+  assert.equal(
+    s.spend(s.actor("finance"), c.id).settlement_status,
+    "Paid by Jaye",
+  );
+});
+test("personal payment details and dates are validated; beneficiary cannot approve", (t) => {
+  const s = fixture(t);
+  assert.throws(
+    () => claim(s, { payment_source: "employee", paid_by_id: "employee" }),
+    /original payment/,
+  );
+  assert.throws(() => claim(s, { invoice_date: "2026-02-30" }), /Invalid date/);
+  assert.throws(
+    () => claim(s, { invoice_date: "2026-10-19", due_date: "2026-10-18" }),
+    /Due date/,
+  );
+  assert.throws(
+    () =>
+      claim(s, {
+        payment_source: "founder",
+        paid_by_id: "cfo",
+        original_paid_date: "2026-10-19",
+        payment_method: "cash",
+      }),
+    /own personal/,
+  );
+  const base = claim(s);
+  const { expected_revision, ...input } = editable(base, {
+    payment_source: "founder",
+    paid_by_id: "cfo",
+    original_paid_date: "2026-10-19",
+    payment_method: "cash",
+    amount_minor: 60000000,
+  });
+  const c = s.createSpend(s.actor("manager"), input);
+  s.upload(s.actor("manager"), c.id, {
+    originalname: "founder.pdf",
+    mimetype: "application/pdf",
+    buffer: Buffer.from("%PDF-1.4 founder"),
+  });
+  s.action(s.actor("manager"), c.id, "submit");
+  s.run("UPDATE spends SET status='cfo_review' WHERE id=?", c.id);
+  assert.throws(
+    () => s.action(s.actor("cfo"), c.id, "approve"),
+    /Separation of duties/,
+  );
+  assert.equal(c.payment_source, "founder");
+});
+
+test("migration upgrades old expense records and retains metadata across reopening", (t) => {
+  const s = fixture(t);
+  const fields = [
+    "payment_source",
+    "paid_by_id",
+    "original_paid_date",
+    "original_payment_reference",
+    "payment_method",
+    "payment_account",
+    "invoice_date",
+    "due_date",
+    "revision",
+  ];
+  for (const field of fields)
+    s.db.exec(`ALTER TABLE spends DROP COLUMN ${field}`);
+  s.run("DELETE FROM migrations WHERE version=4");
+  const upgraded = new FinanceStore(join(s.dir, "test.db"));
+  const old = upgraded.spend(upgraded.actor("finance"), "ng-SP-0001");
+  assert.equal(old.payment_source, "company");
+  assert.equal(old.settlement_status, "Paid by Jaye");
+  const c = claim(upgraded, {
+    payment_source: "employee",
+    paid_by_id: "employee",
+    original_paid_date: "2026-10-19",
+    payment_method: "cash",
+    invoice_number: "EDIT-CLEAR",
+  });
+  const edited = upgraded.updateSpend(
+    upgraded.actor("employee"),
+    c.id,
+    editable(c, { invoice_number: "" }),
+  );
+  assert.equal(edited.invoice_number, null);
+  upgraded.db.close();
+  const reopened = new FinanceStore(join(s.dir, "test.db"));
+  assert.equal(
+    reopened.spend(reopened.actor("employee"), c.id).payment_source,
+    "employee",
+  );
+  assert.equal(reopened.verifyAudit(), true);
+  reopened.db.close();
+});
+
+test("empty workspace starts without demo records and remains empty after reopening", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "jaye-empty-"));
+  const path = join(dir, "workspace.db");
+  let store = new FinanceStore(path, "empty");
+  t.after(() => {
+    store.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  for (const table of [
+    "spends",
+    "vendors",
+    "budgets",
+    "journals",
+    "lines",
+    "receipts",
+    "bank_transactions",
+    "subscriptions",
+    "refunds",
+    "expense_adjustments",
+    "reimbursement_claims",
+    "reimbursement_payments",
+    "recovery_payments",
+    "audit",
+  ]) {
+    assert.equal(
+      store.get(`SELECT count(*) AS total FROM ${table}`).total,
+      0,
+      table,
+    );
+  }
+  assert.equal(store.actor("finance").name, "Workspace owner");
+  assert.equal(store.get("SELECT count(*) AS total FROM users").total, 1);
+  store.db.close();
+  store = new FinanceStore(path, "empty");
+  assert.equal(store.get("SELECT count(*) AS total FROM spends").total, 0);
+  assert.equal(store.get("SELECT count(*) AS total FROM users").total, 1);
+});
+
+test("Nigeria-only workspace exposes and authorizes only Nigeria without deleting other records", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "jaye-nigeria-"));
+  const path = join(dir, "workspace.db");
+  let store = new FinanceStore(path, "empty");
+  store.db.close();
+  store = new FinanceStore(path, "empty", "ng");
+  t.after(() => {
+    store.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const actor = store.actor("finance");
+  assert.deepEqual(
+    store.entities(actor).map((e) => e.id),
+    ["ng"],
+  );
+  assert.throws(() => store.dashboard(actor, "inc"), /Nigeria Ltd only/);
+  assert.equal(store.get("SELECT count(*) AS n FROM entities").n, 2);
+  assert.equal(store.dashboard(actor, "ng").spend_minor, 0);
+  const fresh = new FinanceStore(join(dir, "fresh.db"), "empty", "ng");
+  try {
+    assert.equal(fresh.get("SELECT count(*) AS n FROM entities").n, 1);
+    assert.deepEqual(fresh.actor("finance").entities, ["ng"]);
+  } finally {
+    fresh.db.close();
+  }
+});

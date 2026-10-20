@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./jaye-theme.css";
 export const metadata: Metadata = {
   title: "Jaye Finance · Your money, accounted for",
-  description:
-    "GoJaye’s local spend and accounting workspace. Synthetic shadow environment.",
+  description: "GoJaye’s local spend and accounting workspace.",
 };
 export default function RootLayout({
   children,

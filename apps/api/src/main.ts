@@ -1,3 +1,8 @@
+import { BookkeepingService } from "./bookkeeping";
+import { RecoveryService } from "./recoveries";
+import { AdjustmentService } from "./adjustments";
+import { ReportingService } from "./reporting";
+import { SubscriptionService } from "./subscriptions";
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import {
@@ -63,7 +68,7 @@ class Api {
     return {
       status: "ok",
       mode: "local-shadow",
-      data: "synthetic",
+      data: "workspace",
       productionReady: false,
     };
   }
@@ -104,6 +109,246 @@ class Api {
   }
   @Get("spends/:id") details(@Req() req: Request, @Param("id") id: string) {
     return this.store.details(this.actor(req), id);
+  }
+  @Post("spends/:id/edit") edit(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return this.store.updateSpend(this.actor(req), id, input);
+  }
+  @Post("records/:id/attachments")
+  @UseInterceptors(
+    FileInterceptor("file", {
+      limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+    }),
+  )
+  recordAttachment(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return new BookkeepingService(this.store).attach(this.actor(req), id, file);
+  }
+  @Get("record-attachments/:id")
+  readRecordAttachment(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Res() res: Response,
+  ) {
+    const f = new BookkeepingService(this.store).attachment(
+      this.actor(req),
+      id,
+    );
+    res.set({
+      "Content-Type": f.mime,
+      "Content-Disposition": `attachment; filename="${f.filename}"`,
+    });
+    res.send(f.content);
+  }
+  @Post("records/:id/correct") correctRecord(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new BookkeepingService(this.store).correct(
+      this.actor(req),
+      "record",
+      id,
+      input,
+    );
+  }
+  @Post("record-payments/:id/correct") correctRecordPayment(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new BookkeepingService(this.store).correct(
+      this.actor(req),
+      "payment",
+      id,
+      input,
+    );
+  }
+  @Get("employees") employees(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+  ) {
+    return new BookkeepingService(this.store).employees(
+      this.actor(req),
+      entity,
+    );
+  }
+  @Post("employees") saveEmployee(@Req() req: Request, @Body() input: any) {
+    return new BookkeepingService(this.store).saveEmployee(
+      this.actor(req),
+      input,
+    );
+  }
+  @Post("employees/:id/edit") editEmployee(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new BookkeepingService(this.store).saveEmployee(
+      this.actor(req),
+      input,
+      id,
+    );
+  }
+  @Get("records") records(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+  ) {
+    return new BookkeepingService(this.store).list(this.actor(req), entity);
+  }
+  @Get("records/:id") record(@Req() req: Request, @Param("id") id: string) {
+    return new BookkeepingService(this.store).detail(this.actor(req), id);
+  }
+  @Post("records") recordExpense(@Req() req: Request, @Body() input: any) {
+    return new BookkeepingService(this.store).record(this.actor(req), input);
+  }
+  @Post("records/:id/payments") recordPayment(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new BookkeepingService(this.store).pay(this.actor(req), id, input);
+  }
+  @Post("records/:id/refunds") recordRefund(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new BookkeepingService(this.store).refund(
+      this.actor(req),
+      id,
+      input,
+    );
+  }
+  @Post("records/:id/refunds/:fid/reverse") reverseRecordRefund(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Param("fid") fid: string,
+    @Body() input: any,
+  ) {
+    return new BookkeepingService(this.store).reverseRefund(
+      this.actor(req),
+      id,
+      fid,
+      input,
+    );
+  }
+  @Post("records/:id/bank-match") matchRecordBank(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new BookkeepingService(this.store).matchBank(
+      this.actor(req),
+      id,
+      input,
+    );
+  }
+  @Get("subscriptions") subscriptions(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Query("days") days?: string,
+  ) {
+    return new SubscriptionService(this.store).list(
+      this.actor(req),
+      entity,
+      days ? Number(days) : 90,
+    );
+  }
+  @Post("subscriptions") createSubscription(
+    @Req() req: Request,
+    @Body() input: any,
+  ) {
+    return new SubscriptionService(this.store).save(this.actor(req), input);
+  }
+  @Post("subscriptions/:id/edit") editSubscription(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new SubscriptionService(this.store).save(this.actor(req), input, id);
+  }
+  @Post("subscriptions/:id/action") subscriptionAction(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new SubscriptionService(this.store).action(
+      this.actor(req),
+      id,
+      input,
+    );
+  }
+  @Post("subscriptions/:id/expenses") subscriptionExpense(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new SubscriptionService(this.store).recordExpense(
+      this.actor(req),
+      id,
+      input,
+    );
+  }
+  @Post("subscriptions/:id/invoices") subscriptionInvoice(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new SubscriptionService(this.store).record(
+      this.actor(req),
+      id,
+      input,
+    );
+  }
+  @Get("reimbursements") reimbursements(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+  ) {
+    return this.store.reimbursements(this.actor(req), entity);
+  }
+  @Post("reimbursements") createClaim(@Req() req: Request, @Body() input: any) {
+    return this.store.saveClaim(this.actor(req), input);
+  }
+  @Get("reimbursements/:id") claim(
+    @Req() req: Request,
+    @Param("id") id: string,
+  ) {
+    return this.store.claim(this.actor(req), id);
+  }
+  @Post("reimbursements/:id/edit") editClaim(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return this.store.saveClaim(this.actor(req), input, id);
+  }
+  @Post("reimbursements/:id/action") claimAction(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return this.store.claimAction(this.actor(req), id, input);
+  }
+  @Post("reimbursements/:id/repayments") scheduleRepayment(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return this.store.scheduleRepayment(this.actor(req), id, input);
+  }
+  @Post("repayments/:id/action") repaymentAction(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return this.store.repaymentAction(this.actor(req), id, input);
   }
   @Post("spends/:id/action") action(
     @Req() req: Request,
@@ -169,6 +414,66 @@ class Api {
   ) {
     return this.store.journals(this.actor(req), entity);
   }
+  @Get("reports/operations") operations(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Query("days") days?: string,
+  ) {
+    return new ReportingService(this.store).report(
+      this.actor(req),
+      entity,
+      days ? Number(days) : 90,
+    );
+  }
+  @Get("recoveries") recoveries(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+  ) {
+    return new RecoveryService(this.store).list(this.actor(req), entity);
+  }
+  @Post("recoveries") createRecovery(
+    @Req() req: Request,
+    @Body() input: unknown,
+  ) {
+    return new RecoveryService(this.store).create(this.actor(req), input);
+  }
+  @Post("recoveries/:id/action") recoveryAction(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: unknown,
+  ) {
+    return new RecoveryService(this.store).action(this.actor(req), id, input);
+  }
+  @Post("adjustments") createAdjustment(
+    @Req() req: Request,
+    @Body() input: unknown,
+  ) {
+    return new AdjustmentService(this.store).create(this.actor(req), input);
+  }
+  @Post("adjustments/:id/action") adjustmentAction(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: unknown,
+  ) {
+    return new AdjustmentService(this.store).action(this.actor(req), id, input);
+  }
+  @Post("refunds") createRefund(@Req() req: Request, @Body() input: unknown) {
+    return new ReportingService(this.store).createRefund(
+      this.actor(req),
+      input,
+    );
+  }
+  @Post("refunds/:id/action") refundAction(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: unknown,
+  ) {
+    return new ReportingService(this.store).refundAction(
+      this.actor(req),
+      id,
+      input,
+    );
+  }
   @Get("reports/trial-balance") trial(
     @Req() req: Request,
     @Query("entity") entity: string,
@@ -198,6 +503,26 @@ class Api {
           "amount_minor",
           "currency",
           "status",
+          "approval_status",
+          "settlement_status",
+          "payment_source",
+          "paid_by_id",
+          "requester",
+          "department",
+          "category",
+          "purpose",
+          "invoice_number",
+          "invoice_date",
+          "due_date",
+          "original_paid_date",
+          "payment_method",
+          "payment_account",
+          "original_payment_reference",
+          "outstanding_minor",
+          "adjustment_minor",
+          "effective_amount_minor",
+          "recoverable_minor",
+          "receipt_count",
         ],
         rows.map((r) => [
           r.id,
@@ -207,6 +532,26 @@ class Api {
           r.amount_minor,
           r.currency,
           r.status,
+          r.approval_status,
+          r.settlement_status,
+          r.payment_source,
+          r.paid_by_id,
+          r.requester,
+          r.department,
+          r.category,
+          r.purpose,
+          r.invoice_number,
+          r.invoice_date,
+          r.due_date,
+          r.original_paid_date,
+          r.payment_method,
+          r.payment_account,
+          r.original_payment_reference,
+          r.outstanding_minor,
+          r.adjustment_minor,
+          r.effective_amount_minor,
+          r.recoverable_minor,
+          r.receipt_count,
         ]),
       );
     } else if (type === "trial-balance") {
@@ -219,7 +564,7 @@ class Api {
     res
       .set({
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="SYNTHETIC-jaye-${entity}-${type}.csv"`,
+        "Content-Disposition": `attachment; filename="jaye-${entity}-${type}.csv"`,
         "Cache-Control": "no-store",
       })
       .send(out);
@@ -269,6 +614,8 @@ export async function createFinanceApp(store?: FinanceStore) {
             new FinanceStore(
               process.env.JAYE_DB_PATH ||
                 resolve(__dirname, "../../../data/jaye.db"),
+              "empty",
+              "ng",
             ),
         },
       ],
@@ -299,7 +646,7 @@ async function bootstrap() {
   const app = await createFinanceApp();
   await app.listen(3001, "127.0.0.1");
   console.log(
-    "Jaye Finance API: http://127.0.0.1:3001/api/health · SYNTHETIC SHADOW MODE",
+    "Jaye Finance API: http://127.0.0.1:3001/api/health · LOCAL WORKSPACE",
   );
 }
 if (require.main === module) bootstrap();

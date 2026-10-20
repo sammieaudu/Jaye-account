@@ -1,4 +1,13 @@
 "use client";
+import Select from "./select";
+import Bookkeeping from "./bookkeeping";
+import Recoveries from "./recoveries";
+import Reimbursements from "./reimbursements";
+import Subscriptions from "./subscriptions";
+import Reporting from "./reporting";
+import { AuditTrail, SettingsControls, InvestorWorkspace } from "./governance";
+import FinanceStatus from "./finance-status";
+import RegisterDetails from "./register-details";
 import {
   useCallback,
   useRef,
@@ -44,16 +53,50 @@ import {
   Menu,
 } from "lucide-react";
 type Row = Record<string, any>;
-const menus = [
-  { label: "Overview", icon: LayoutDashboard },
-  { label: "Spend", icon: Receipt },
-  { label: "Approvals", icon: CheckCheck },
-  { label: "Budgets", icon: PieChart },
-  { label: "Payments", icon: Landmark },
-  { label: "Vendors", icon: Users },
-  { label: "General ledger", icon: Layers3 },
-  { label: "Reports", icon: FileText },
-  { label: "Audit trail", icon: ShieldCheck },
+const menuGroups = [
+  { title: "Workspace", items: [{ label: "Overview", icon: LayoutDashboard }] },
+  {
+    title: "Expenses & suppliers",
+    items: [
+      { label: "Expenses", icon: Receipt },
+      { label: "Subscriptions", icon: RefreshCw },
+      { label: "Vendors", icon: Users, display: "Suppliers" },
+    ],
+  },
+  {
+    title: "Team & payroll",
+    items: [
+      { label: "Employees", icon: Users },
+      { label: "Payroll", icon: Wallet },
+    ],
+  },
+  {
+    title: "Planning & reports",
+    items: [
+      { label: "Budgets", icon: PieChart },
+      { label: "Reports", icon: FileText },
+    ],
+  },
+  {
+    title: "Approvals & repayments",
+    advanced: true,
+    items: [
+      { label: "Spend", icon: Receipt, display: "Approval requests" },
+      { label: "Approvals", icon: CheckCheck },
+      { label: "Payments", icon: Landmark, display: "Payment approvals" },
+      { label: "Reimbursements", icon: Wallet },
+      { label: "Recoveries", icon: ArrowDownLeft },
+    ],
+  },
+  {
+    title: "Accounting & review",
+    advanced: true,
+    items: [
+      { label: "General ledger", icon: Layers3 },
+      { label: "Audit trail", icon: ShieldCheck },
+      { label: "Investor workspace", icon: Globe2 },
+    ],
+  },
 ];
 const roleNames: Record<string, string> = {
   employee: "Employee",
@@ -86,8 +129,9 @@ const cats = [
   "Professional fees",
   "Travel",
   "Government fees",
+  "Salaries",
 ];
-const departments = ["Engineering", "Marketing", "Operations", "Finance"];
+const departments = ["Product", "Marketing", "Operations", "Finance"];
 const api = async (path: string, options: RequestInit = {}) => {
   const r = await fetch("/api" + path, {
     ...options,
@@ -162,11 +206,33 @@ export default function Home() {
     [toast, setToast] = useState(""),
     [loading, setLoading] = useState(true),
     [search, setSearch] = useState(""),
+    [globalSearch, setGlobalSearch] = useState(""),
     [filter, setFilter] = useState("all"),
+    [sourceFilter, setSourceFilter] = useState("all"),
+    [categoryFilter, setCategoryFilter] = useState("all"),
+    [fromDate, setFromDate] = useState(""),
+    [toDate, setToDate] = useState(""),
     [detail, setDetail] = useState<Row | null>(null),
+    [recordTarget, setRecordTarget] = useState(""),
+    [registerDetail, setRegisterDetail] = useState<{
+      kind: "budget" | "vendor" | "journal";
+      record: Row;
+    } | null>(null),
     [modal, setModal] = useState(""),
     [busy, setBusy] = useState(false),
-    [nav, setNav] = useState(false);
+    [nav, setNav] = useState(false),
+    [advanced, setAdvanced] = useState(false);
+  useEffect(() => {
+    if (!nav) return;
+    const closeMenu = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setNav(false);
+        document.querySelector<HTMLButtonElement>(".mobile-menu")?.focus();
+      }
+    };
+    document.addEventListener("keydown", closeMenu);
+    return () => document.removeEventListener("keydown", closeMenu);
+  }, [nav]);
   const loadVersion = useRef(0);
   const currency = entity === "inc" ? "USD" : "NGN";
   const current = entities.find((e) => e.id === entity);
@@ -191,7 +257,13 @@ export default function Home() {
           });
         }
         setUser(me.user);
-        setPage(me.user.role === "employee" ? "Spend" : "Overview");
+        setPage(
+          me.user.role === "employee"
+            ? "Spend"
+            : me.user.role === "investor"
+              ? "Investor workspace"
+              : "Overview",
+        );
         setEntities(await api("/entities"));
       } catch (e) {
         setError((e as Error).message);
@@ -201,8 +273,10 @@ export default function Home() {
     })();
   }, []);
   useEffect(() => {
-    if (!modal && !detail) return;
+    if (!modal) return;
     const previous = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const dialog = document.querySelector<HTMLElement>(
       modal ? ".modal" : ".drawer",
     );
@@ -212,6 +286,7 @@ export default function Home() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (modal) setModal("");
+        else if (registerDetail) setRegisterDetail(null);
         else setDetail(null);
       }
       if (e.key === "Tab" && dialog) {
@@ -234,9 +309,17 @@ export default function Home() {
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
       previous?.focus();
     };
-  }, [modal, detail?.id]);
+  }, [modal, detail?.id, registerDetail]);
+  useEffect(() => {
+    if (detail || registerDetail) {
+      const view = document.querySelector<HTMLElement>(".record-page-content");
+      view?.scrollIntoView({ block: "start" });
+      view?.focus();
+    }
+  }, [detail?.id, registerDetail]);
   const load = useCallback(async () => {
     if (!user) return;
     const version = ++loadVersion.current;
@@ -293,7 +376,13 @@ export default function Home() {
       setLoading(true);
       setUser(me.user);
       setDetail(null);
-      setPage(me.user.role === "employee" ? "Spend" : "Overview");
+      setPage(
+        me.user.role === "employee"
+          ? "Spend"
+          : me.user.role === "investor"
+            ? "Investor workspace"
+            : "Overview",
+      );
       setEntities(await api("/entities"));
       notify(`Testing as ${me.user.name} · ${roleNames[me.user.role]}`);
     } catch (e) {
@@ -301,6 +390,16 @@ export default function Home() {
     }
   }
   function navigate(name: string) {
+    if (
+      menuGroups.some(
+        (group) =>
+          group.advanced && group.items.some((item) => item.label === name),
+      )
+    )
+      setAdvanced(true);
+    setRecordTarget("");
+    setRegisterDetail(null);
+    setDetail(null);
     if (name === page) {
       load();
       setNav(false);
@@ -314,6 +413,10 @@ export default function Home() {
     setFilter("all");
     setNav(false);
     setDetail(null);
+  }
+  function openRecord(id?: string, kind?: string) {
+    navigate(kind === "salary" ? "Payroll" : "Expenses");
+    setRecordTarget(id || "");
   }
   async function openDetail(id: string) {
     try {
@@ -341,12 +444,37 @@ export default function Home() {
   }
   const filtered = spends
     .filter((s) =>
-      [s.description, s.vendor, s.id, s.requester]
+      [
+        s.description,
+        s.vendor,
+        s.id,
+        s.requester,
+        s.invoice_number,
+        users.find((u) => u.id === s.paid_by_id)?.name,
+      ]
         .join(" ")
         .toLowerCase()
         .includes(search.toLowerCase()),
     )
-    .filter((s) => filter === "all" || s.status === filter)
+    .filter(
+      (s) =>
+        filter === "all" ||
+        (filter === "missing"
+          ? s.kind !== "request" && !s.receipt_count
+          : filter === "owed"
+            ? s.payment_source !== "company" &&
+              s.outstanding_minor > 0 &&
+              ["approved", "scheduled"].includes(s.status)
+            : s.status === filter),
+    )
+    .filter(
+      (s) =>
+        page !== "Spend" ||
+        ((sourceFilter === "all" || s.payment_source === sourceFilter) &&
+          (categoryFilter === "all" || s.category === categoryFilter) &&
+          (!fromDate || s.date >= fromDate) &&
+          (!toDate || s.date <= toDate)),
+    )
     .filter((s) =>
       page === "Approvals"
         ? ["manager_review", "finance_review", "cfo_review"].includes(s.status)
@@ -380,7 +508,8 @@ export default function Home() {
               </th>
               <th>Transaction</th>
               <th>Department</th>
-              <th>Status</th>
+              <th>Approval</th>
+              {!short && <th>Settlement</th>}
               <th className="number">Amount</th>
               <th />
             </tr>
@@ -422,10 +551,33 @@ export default function Home() {
                   <span className="dept">{s.department}</span>
                 </td>
                 <td>
-                  <Badge status={s.status} />
+                  <Badge status={s.approval_status || s.status} />
                 </td>
+                {!short && (
+                  <td>
+                    <strong>{s.settlement_status}</strong>
+                    <small className="expense-subline">
+                      {s.payment_source === "company"
+                        ? "Jaye → vendor"
+                        : `${s.payment_source === "founder" ? "Founder" : "Employee"} · ${users.find((u) => u.id === s.paid_by_id)?.name || "Unknown payer"}`}
+                    </small>
+                    <small className="expense-subline">
+                      {s.receipt_count
+                        ? `${s.receipt_count} attachment(s)`
+                        : s.kind === "request"
+                          ? "Pre-approval request"
+                          : "Receipt missing"}
+                    </small>
+                  </td>
+                )}
                 <td className="number amount">
                   {fmt(s.amount_minor, s.currency)}
+                  {s.adjustment_minor > 0 && (
+                    <small className="micro">
+                      Net cost {fmt(s.effective_amount_minor, s.currency)} · due{" "}
+                      {fmt(s.outstanding_minor, s.currency)}
+                    </small>
+                  )}
                 </td>
                 <td>
                   <ChevronRight size={16} className="muted" />
@@ -441,8 +593,41 @@ export default function Home() {
       </Empty>
     );
   }
-  const activeRoles =
-    page === "Overview"
+  function renderMenuItem({
+    label,
+    icon: Icon,
+    display,
+  }: {
+    label: string;
+    icon: typeof Users;
+    display?: string;
+  }) {
+    return (
+      <button
+        key={label}
+        aria-current={page === label ? "page" : undefined}
+        className={page === label ? "active" : ""}
+        onClick={() => navigate(label)}
+      >
+        <Icon size={18} />
+        <span>{display || label}</span>
+        {label === "Approvals" && (
+          <span className="nav-count">
+            {
+              spends.filter((s) =>
+                ["manager_review", "finance_review", "cfo_review"].includes(
+                  s.status,
+                ),
+              ).length
+            }
+          </span>
+        )}
+      </button>
+    );
+  }
+  const activeRoles = ["Expenses", "Employees", "Payroll"].includes(page)
+    ? ["finance", "cfo", "auditor", "reconciler"]
+    : page === "Overview"
       ? ["manager", "finance", "cfo", "auditor", "payer", "reconciler"]
       : page === "Budgets"
         ? ["manager", "finance", "cfo", "auditor"]
@@ -453,73 +638,66 @@ export default function Home() {
             : null;
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${nav ? "open" : ""}`}>
-        <a className="brand" href="/" aria-label="Jaye Finance home">
-          <span className="brand-symbol">
-            j<span>↗</span>
-          </span>
-          <span>
-            jaye<span className="brand-finance">finance</span>
-          </span>
-        </a>
-        <div className="workspace">
-          <div className="workspace-logo">J</div>
-          <div>
-            <strong>GoJaye workspace</strong>
-            <small>Finance & operations</small>
-          </div>
-          <ChevronsUpDown size={15} />
-        </div>
-        <div className="nav-caption">WORKSPACE</div>
-        <nav>
-          {menus.map(({ label, icon: Icon }) => (
-            <button
-              key={label}
-              className={page === label ? "active" : ""}
-              onClick={() => navigate(label)}
-            >
-              <Icon size={19} />
-              <span>{label}</span>
-              {label === "Approvals" && (
-                <span className="nav-count">
-                  {
-                    spends.filter((s) =>
-                      [
-                        "manager_review",
-                        "finance_review",
-                        "cfo_review",
-                      ].includes(s.status),
-                    ).length
-                  }
-                </span>
-              )}
-            </button>
-          ))}
-        </nav>
-        <div className="nav-caption investor-caption">STAKEHOLDERS</div>
+      {nav && (
         <button
-          className={`investor-nav ${page === "Investor workspace" ? "active" : ""}`}
-          onClick={() => navigate("Investor workspace")}
+          className="mobile-nav-backdrop"
+          tabIndex={-1}
+          aria-label="Dismiss navigation"
+          onClick={() => setNav(false)}
+        />
+      )}
+      <aside id="main-navigation" className={`sidebar ${nav ? "open" : ""}`}>
+        <button
+          className="mobile-nav-close icon-button"
+          aria-label="Close navigation"
+          onClick={() => {
+            setNav(false);
+            document.querySelector<HTMLButtonElement>(".mobile-menu")?.focus();
+          }}
         >
-          <Globe2 size={19} />
-          <span>Investor workspace</span>
-          <ArrowUpRight size={14} />
+          <X size={20} />
         </button>
-        <div className="sidebar-bottom">
-          <div className="shadow-card">
-            <ShieldCheck size={21} />
-            <strong>Built on trust.</strong>
-            <p>
-              Every transaction.
-              <br />
-              Every approval. Accounted for.
-            </p>
-            <span>
-              <span className="live-dot" /> Shadow environment
-            </span>
-          </div>
-          <button className="settings-nav" onClick={() => navigate("Settings")}>
+        <a className="brand" href="/" aria-label="Jaye Finance home">
+          <img src="/brand/jaye.svg" alt="Jaye" />
+          <span className="brand-finance">Finance</span>
+        </a>
+        <nav aria-label="Main navigation">
+          {menuGroups
+            .filter((group) => !group.advanced)
+            .map((group) => (
+              <div className="nav-group" key={group.title}>
+                <div className="nav-caption">{group.title}</div>
+                {group.items.map((item) => renderMenuItem(item))}
+              </div>
+            ))}
+          <button
+            className="advanced-toggle"
+            aria-expanded={advanced}
+            aria-controls="additional-navigation"
+            onClick={() => setAdvanced(!advanced)}
+          >
             <Settings2 size={18} />
+            <span>More accounting tools</span>
+            <ChevronDown size={16} />
+          </button>
+          <div id="additional-navigation" hidden={!advanced}>
+            {menuGroups
+              .filter((group) => group.advanced)
+              .map((group) => (
+                <div className="nav-group" key={group.title}>
+                  <div className="nav-caption">{group.title}</div>
+                  {group.items.map((item) => renderMenuItem(item))}
+                </div>
+              ))}
+          </div>
+        </nav>
+        <div className="sidebar-bottom">
+          <button
+            className={`settings-nav ${page === "Settings" ? "active" : ""}`}
+            aria-current={page === "Settings" ? "page" : undefined}
+            onClick={() => navigate("Settings")}
+          >
+            <img src="/brand/settings.svg" alt="" />
             Settings & controls
           </button>
           <div className="profile">
@@ -538,542 +716,1083 @@ export default function Home() {
             className="mobile-menu icon-button"
             onClick={() => setNav(!nav)}
             aria-label="Open menu"
+            aria-expanded={nav}
+            aria-controls="main-navigation"
           >
             <Menu size={21} />
           </button>
-          <div className="breadcrumb">
-            Workspace <ChevronRight size={14} />
-            <strong>{page}</strong>
-          </div>
+          <form
+            className="global-search"
+            role="search"
+            onSubmit={(event) => {
+              event.preventDefault();
+              navigate("Expenses");
+              setSearch(globalSearch.trim());
+            }}
+          >
+            <img src="/brand/search.svg" alt="" />
+            <input
+              aria-label="Search expenses"
+              placeholder="Search expenses, vendors or references…"
+              value={globalSearch}
+              onChange={(event) => setGlobalSearch(event.target.value)}
+            />
+            <button type="submit" aria-label="Search expenses and open results">
+              <ArrowRight size={16} />
+            </button>
+          </form>
           <div className="top-right">
-            <span className="test-label">
-              <span />
-              LOCAL TEST MODE
-            </span>
             <button
               className="icon-button"
-              title="Notifications"
+              title="Quick guide"
               onClick={() =>
                 notify(
-                  "Notifications are local only. Review the Approvals and Payments queues for pending work.",
+                  "Use Expenses for purchases and unpaid bills. Add your team in Employees, then record salaries and payments in Payroll.",
                 )
               }
             >
-              <Bell size={19} />
-              <span className="notification-dot" />
+              <FileText size={20} />
             </button>
-            <div className="top-avatar">
+            <div className="top-avatar" title={user?.name || "Workspace owner"}>
               {user ? initials(user.name) : "JF"}
             </div>
           </div>
         </header>
-        <div className="demo-banner">
-          <span>
-            <ShieldCheck size={15} />
-            <strong>Synthetic data · Shadow mode</strong>
-            <span className="demo-explain">
-              No real payments. No live accounting records.
-            </span>
-          </span>
-          <label>
-            Test as{" "}
-            <select
-              aria-label="Local test identity"
-              value={user?.id || "finance"}
-              onChange={(e) => switchUser(e.target.value)}
-            >
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} · {roleNames[u.role]}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={13} />
-          </label>
-        </div>
         <main>
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">YOUR FINANCIAL WORKSPACE</div>
-              <h1>
-                {page === "Overview" ? "A clear view of your money." : page}
-              </h1>
-              <p>
-                {page === "Overview"
-                  ? "Track spend, stay in control, and keep every naira accounted for."
-                  : page === "Spend"
-                    ? "From the first request to the final journal. All in one place."
-                    : page === "Approvals"
-                      ? "Review the evidence. Make a decision. Keep things moving."
-                      : page === "Budgets"
-                        ? "Plan with intention. See what’s spent, committed, and still available."
-                        : page === "Payments"
-                          ? "Approved spend, confirmed payments, and a clear paper trail."
-                          : page === "General ledger"
-                            ? "Balanced entries. Immutable records. A dependable foundation."
-                            : page === "Reports"
-                              ? "Financial statements that trace directly to posted journals."
-                              : page === "Audit trail"
-                                ? "A complete, tamper-evident history of every financial action."
-                                : page === "Vendors"
-                                  ? "The people and businesses that help GoJaye run."
-                                  : "Transparency, with the right controls."}
-              </p>
-            </div>
-            {canCreate && (
-              <button
-                className="button primary"
-                onClick={() => setModal("spend")}
+          {registerDetail && (
+            <RegisterDetails
+              kind={registerDetail.kind}
+              record={registerDetail.record}
+              entityName={current?.name || entity}
+              currency={currency}
+              users={users}
+              format={fmt}
+              onClose={() => setRegisterDetail(null)}
+              onSource={(id) => {
+                setRegisterDetail(null);
+                void openDetail(id);
+              }}
+            />
+          )}
+          {detail && (
+            <div className="record-page">
+              <section
+                className="drawer record-page-content"
+                tabIndex={-1}
+                aria-label="Spend details"
               >
-                <Plus size={17} />
-                New expense
-              </button>
-            )}
-          </div>
-          <div className="workspace-toolbar">
-            <div className="entity-select">
-              <span className="entity-icon">
-                <Building2 size={17} />
-              </span>
-              <select
-                aria-label="Legal entity"
-                value={entity}
-                onChange={(e) => {
-                  if(e.target.value===entity)return;
-                  loadVersion.current++;
-                  setData(null);
-                  setSpends([]);
-                  setLoading(true);
-                  setEntity(e.target.value);
-                  setDetail(null);
-                }}
-              >
-                {entities.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.name}
-                  </option>
-                ))}
-                <option value="group">Consolidated group · gated</option>
-              </select>
-              <ChevronDown size={14} />
-              <span className="currency-chip">
-                {entity === "group" ? "USD" : currency}
-              </span>
-            </div>
-            <div className="period-label">
-              <Clock3 size={15} />
-              October 2026<span className="period-note">Local test period</span>
-            </div>
-            <button
-              className="icon-button refresh"
-              onClick={load}
-              aria-label="Refresh records"
-            >
-              <RefreshCw size={16} />
-            </button>
-          </div>
-          {error && (
-            <div className="error-banner" role="alert">
-              <AlertCircle size={18} />
-              {error}
-              <button onClick={load}>Retry</button>
+                <div className="drawer-top">
+                  <span className="kicker">TRANSACTION DETAILS</span>
+                  <button
+                    className="button secondary"
+                    onClick={() => setDetail(null)}
+                  >
+                    ← Back to {page}
+                  </button>
+                </div>
+                <div className="drawer-hero">
+                  <span className="vendor-icon large">
+                    <Receipt size={24} />
+                  </span>
+                  <h2>{detail.description}</h2>
+                  <p>{detail.vendor}</p>
+                  <strong>{fmt(detail.amount_minor, detail.currency)}</strong>
+                  <Badge status={detail.status} />
+                </div>
+                <div className="detail-grid">
+                  {[
+                    ["Record", detail.id],
+                    ["Type", detail.kind],
+                    ["Entity", current?.name],
+                    [
+                      "Requester",
+                      users.find((u) => u.id === detail.requester_id)?.name,
+                    ],
+                    ["Department", detail.department],
+                    ["Category", detail.category],
+                    ["Transaction date", detail.date],
+                    ["Purpose", detail.purpose],
+                    ...(detail.subscription_id
+                      ? [
+                          ["Subscription", detail.subscription_name],
+                          ["Billing cycle", detail.billing_date],
+                        ]
+                      : []),
+                    [
+                      "Approval",
+                      statusNames[detail.approval_status] ||
+                        detail.approval_status,
+                    ],
+                    ["Settlement", detail.settlement_status],
+                    [
+                      "Paid by",
+                      detail.payment_source === "company"
+                        ? "Jaye"
+                        : `${detail.payment_source} · ${users.find((u) => u.id === detail.paid_by_id)?.name}`,
+                    ],
+                    [
+                      "Amount still to settle",
+                      fmt(detail.outstanding_minor, detail.currency),
+                    ],
+                    ...(detail.adjustment_minor > 0
+                      ? [
+                          [
+                            "Credits / personal refunds",
+                            fmt(detail.adjustment_minor, detail.currency),
+                          ],
+                          [
+                            "Adjusted expense cost",
+                            fmt(detail.effective_amount_minor, detail.currency),
+                          ],
+                        ]
+                      : []),
+                    ...(detail.recoverable_minor > 0
+                      ? [
+                          [
+                            "Due back to Jaye",
+                            fmt(detail.recoverable_minor, detail.currency),
+                          ],
+                        ]
+                      : []),
+                    ...(detail.pending_adjustments
+                      ? [
+                          [
+                            "Payment hold",
+                            "Credit / refund awaiting posting or cancellation",
+                          ],
+                        ]
+                      : []),
+                    ["Invoice number", detail.invoice_number || "—"],
+                    ["Invoice date", detail.invoice_date || "—"],
+                    ["Due date", detail.due_date || "—"],
+                    [
+                      "Original payment date",
+                      detail.original_paid_date || "Not recorded",
+                    ],
+                    [
+                      "Payment method",
+                      detail.payment_method?.replaceAll("_", " ") || "—",
+                    ],
+                    ["Account / method label", detail.payment_account || "—"],
+                    [
+                      "Original payment reference",
+                      detail.original_payment_reference || "—",
+                    ],
+                    ...(detail.payment_reference
+                      ? [["Bank confirmation", detail.payment_reference]]
+                      : []),
+                    ...(detail.reconciliation_reference
+                      ? [
+                          [
+                            "Statement reference",
+                            detail.reconciliation_reference,
+                          ],
+                        ]
+                      : []),
+                  ].map(([k, v]) => (
+                    <div key={k}>
+                      <span>{k}</span>
+                      <strong>{v}</strong>
+                    </div>
+                  ))}
+                </div>
+                {user?.id === detail.requester_id &&
+                  ["draft", "returned"].includes(detail.status) && (
+                    <button
+                      className="button secondary"
+                      onClick={() => setModal("edit")}
+                    >
+                      Edit expense details
+                    </button>
+                  )}
+                {detail.warnings.length > 0 && (
+                  <div className="warnings">
+                    <h3>
+                      <AlertCircle size={16} />
+                      Policy checks
+                    </h3>
+                    {detail.warnings.map((w: string) => (
+                      <p key={w}>{w}</p>
+                    ))}
+                  </div>
+                )}
+                <div className="detail-section">
+                  <h3>
+                    Supporting evidence <span>{detail.receipts.length}</span>
+                  </h3>
+                  {detail.receipts.map((r: Row) => (
+                    <a
+                      className="receipt-file"
+                      href={`/api/receipts/${r.id}`}
+                      key={r.id}
+                    >
+                      <FileText size={20} />
+                      <div>
+                        <strong>{r.filename}</strong>
+                        <small>
+                          {r.synthetic
+                            ? "Synthetic fixture · not a real invoice"
+                            : "Encrypted original · immutable evidence"}
+                        </small>
+                      </div>
+                      <Download size={16} />
+                    </a>
+                  ))}
+                  {!detail.receipts.length && (
+                    <p className="muted">No supporting evidence attached.</p>
+                  )}
+                  {user?.id === detail.requester_id &&
+                    ["draft", "returned"].includes(detail.status) && (
+                      <label className="upload-inline">
+                        <Upload size={16} />
+                        Attach receipt
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,application/pdf"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const form = new FormData();
+                            form.append("file", file);
+                            try {
+                              await api(`/spends/${detail.id}/receipt`, {
+                                method: "POST",
+                                body: form,
+                              });
+                              await openDetail(detail.id);
+                              notify("Evidence encrypted and attached.");
+                            } catch (err) {
+                              notify((err as Error).message);
+                            }
+                          }}
+                        />
+                      </label>
+                    )}
+                </div>
+                {detail.claim_id ? (
+                  <div className="workflow">
+                    <h3>Grouped reimbursement</h3>
+                    <p>
+                      This expense belongs to {detail.claim_id}. Review and
+                      repay it through its claim.
+                    </p>
+                    <button
+                      className="button primary"
+                      onClick={() => navigate("Reimbursements")}
+                    >
+                      Open reimbursements
+                    </button>
+                  </div>
+                ) : (
+                  <Workflow
+                    detail={detail}
+                    user={user}
+                    busy={busy}
+                    onAction={perform}
+                    onConvert={() => setModal("convert")}
+                  />
+                )}
+                <div className="detail-section">
+                  <h3>Activity & approvals</h3>
+                  <div className="timeline">
+                    {detail.history.map((h: Row) => (
+                      <div key={h.id}>
+                        <span className="timeline-dot" />
+                        <strong>
+                          {h.action.replace("spend.", "").replaceAll("_", " ")}
+                        </strong>
+                        <small>
+                          {h.actor} · {new Date(h.created_at).toLocaleString()}
+                        </small>
+                        {JSON.parse(h.details).changes && (
+                          <details>
+                            <summary>View changed fields</summary>
+                            {Object.entries(JSON.parse(h.details).changes).map(
+                              ([field, change]: [string, any]) => (
+                                <p key={field}>
+                                  {field.replaceAll("_", " ")}:{" "}
+                                  {String(change.before || "—")} →{" "}
+                                  {String(change.after || "—")}
+                                </p>
+                              ),
+                            )}
+                          </details>
+                        )}
+                        {JSON.parse(h.details).comment && (
+                          <p>{JSON.parse(h.details).comment}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
             </div>
           )}
-          {loading ? (
-            <div className="loading">
-              <RefreshCw size={22} className="spin" />
-              Loading your workspace…
-            </div>
-          ) : user?.role === "investor" || page === "Investor workspace" ? (
-            <div className="gated-panel">
-              <div className="gated-icon">
-                <Globe2 size={32} />
+
+          <div hidden={!!detail || !!registerDetail}>
+            <div
+              className={`page-heading ${page === "Overview" ? "dashboard-heading" : ""}`}
+            >
+              <div>
+                <h1>
+                  {page === "Overview"
+                    ? "Dashboard"
+                    : page === "Settings"
+                      ? "Settings & controls"
+                      : page === "Spend"
+                        ? "Approval requests"
+                        : page === "Vendors"
+                          ? "Suppliers"
+                          : page === "Payments"
+                            ? "Payment approvals"
+                            : page}
+                </h1>
+                <p>
+                  {page === "Overview"
+                    ? "Track spend, stay in control, and keep every naira accounted for."
+                    : page === "Expenses"
+                      ? "Record purchases, unpaid bills and payments in one place."
+                      : page === "Employees"
+                        ? "Keep employee details and agreed salaries up to date."
+                        : page === "Payroll"
+                          ? "Document monthly salaries, payments and the amount still owed."
+                          : page === "Recoveries"
+                            ? "Track repayments to Jaye, match bank credits, and clear recovery balances."
+                            : page === "Subscriptions"
+                              ? "Track recurring costs, departments and renewal dates."
+                              : page === "Reimbursements"
+                                ? "Group personal expenses, repay in stages, and see what each person is owed."
+                                : page === "Spend"
+                                  ? "From the first request to the final journal. All in one place."
+                                  : page === "Approvals"
+                                    ? "Review the evidence. Make a decision. Keep things moving."
+                                    : page === "Budgets"
+                                      ? "Plan with intention. See what’s spent, committed, and still available."
+                                      : page === "Payments"
+                                        ? "Approved spend, confirmed payments, and a clear paper trail."
+                                        : page === "General ledger"
+                                          ? "Balanced entries. Immutable records. A dependable foundation."
+                                          : page === "Reports"
+                                            ? "Outstanding balances, recurring forecasts, refunds and posted financial statements."
+                                            : page === "Audit trail"
+                                              ? "A complete, tamper-evident history of every financial action."
+                                              : page === "Vendors"
+                                                ? "Save the suppliers you buy from, then reuse their names when recording expenses."
+                                                : "Transparency, with the right controls."}
+                </p>
               </div>
-              <span className="kicker">INVESTOR TRANSPARENCY</span>
-              <h2>A trusted view, approved first.</h2>
-              <p>
-                Investors see frozen, CFO-approved monthly snapshots in USD. No
-                snapshots have been approved in this local environment.
-              </p>
-              <div className="gate-items">
-                <span>
-                  <LockKeyhole size={16} />
-                  Live financial data stays private
+              {canCreate &&
+                ["Overview", "Spend", "Approvals", "Payments"].includes(
+                  page,
+                ) && (
+                  <button
+                    className="button primary"
+                    onClick={() =>
+                      page === "Overview"
+                        ? navigate("Expenses")
+                        : setModal("spend")
+                    }
+                  >
+                    <Plus size={17} />
+                    {page === "Overview"
+                      ? "Record expense"
+                      : "New approval request"}
+                  </button>
+                )}
+            </div>
+            <div className="workspace-toolbar">
+              <div className="entity-select">
+                <span className="entity-icon">
+                  <Building2 size={17} />
                 </span>
-                <span>
-                  <ShieldCheck size={16} />
-                  Approval and version history required
-                </span>
-                <span>
-                  <Globe2 size={16} />
-                  Consolidation & FX policy pending
+                <span className="workspace-company">GoJaye Nigeria Ltd</span>
+                <span className="currency-chip">
+                  {entity === "group" ? "USD" : currency}
                 </span>
               </div>
-              <span className="tag">Phase 2 · Awaiting policy approval</span>
+              <div className="period-label">
+                <Clock3 size={15} />
+                {new Intl.DateTimeFormat("en-NG", {
+                  month: "long",
+                  year: "numeric",
+                  timeZone: "Africa/Lagos",
+                }).format(new Date())}
+              </div>
+              <button
+                className="icon-button refresh"
+                onClick={load}
+                aria-label="Refresh records"
+              >
+                <RefreshCw size={16} />
+              </button>
             </div>
-          ) : user?.role === "admin" ? (
-            <Empty title="Technical configuration only">
-              This role cannot view, approve, post or pay financial records.
-              Choose another local test identity to test those workflows.
-            </Empty>
-          ) : entity === "group" ? (
-            <Empty title="Group consolidation is gated">
-              Consolidated figures require approved FX policies, matched
-              intercompany balances and a frozen consolidation run. Select an
-              individual entity to test spend and the ledger.
-            </Empty>
-          ) : activeRoles && !activeRoles.includes(user?.role || "") ? (
-            <Empty title="This view is restricted for your role">
-              Use the local test identity selector to explore authorized roles.
-              Employees can submit and track their own expenses from Spend.
-            </Empty>
-          ) : (
-            !error && (
-              <>
-                {page === "Overview" && data && (
-                  <>
-                    <div className="metrics">
-                      <Metric
-                        label="Cash in the books"
-                        value={fmt(data.cash_minor, currency, true)}
-                        icon={<Wallet size={19} />}
-                        note="Operating account · posted ledger"
+            {error && (
+              <div className="error-banner" role="alert">
+                <AlertCircle size={18} />
+                {error}
+                <button onClick={load}>Retry</button>
+              </div>
+            )}
+            {loading ? (
+              <div className="loading">
+                <RefreshCw size={22} className="spin" />
+                Loading your workspace…
+              </div>
+            ) : user?.role === "investor" || page === "Investor workspace" ? (
+              <InvestorWorkspace />
+            ) : user?.role === "admin" ? (
+              <Empty title="Technical configuration only">
+                This role cannot view, approve, post or pay financial records.
+                Contact your workspace administrator for financial access.
+              </Empty>
+            ) : entity === "group" ? (
+              <Empty title="Group consolidation is gated">
+                Consolidated figures require approved FX policies, matched
+                intercompany balances and a frozen consolidation run. Select an
+                individual entity to view spend and the ledger.
+              </Empty>
+            ) : activeRoles && !activeRoles.includes(user?.role || "") ? (
+              <Empty title="This view is restricted for your role">
+                Contact your workspace administrator if you need access.
+                Employees can submit and track their own expenses from Spend.
+              </Empty>
+            ) : (
+              !error && (
+                <>
+                  {page === "Recoveries" && user && (
+                    <Recoveries
+                      key={`${entity}:${user.id}`}
+                      entity={entity}
+                      currency={currency}
+                      user={user}
+                      request={api}
+                      onExpense={openDetail}
+                    />
+                  )}
+                  {page === "Subscriptions" && user && (
+                    <Subscriptions
+                      key={`${entity}:${user.id}`}
+                      entity={entity}
+                      currency={currency}
+                      user={user}
+                      users={users}
+                      vendors={vendors}
+                      spends={spends}
+                      request={api}
+                      onExpense={openDetail}
+                      onRecord={openRecord}
+                    />
+                  )}
+                  {page === "Reimbursements" && user && (
+                    <Reimbursements
+                      key={`${entity}:${user.id}`}
+                      entity={entity}
+                      currency={currency}
+                      user={user}
+                      request={api}
+                      onExpense={openDetail}
+                    />
+                  )}
+                  {["Expenses", "Employees", "Payroll"].includes(page) &&
+                    user && (
+                      <Bookkeeping
+                        key={`${page}:${entity}`}
+                        entity={entity}
+                        currency={currency}
+                        page={page}
+                        initialQuery={search}
+                        initialRecordId={recordTarget}
+                        user={user}
+                        request={api}
+                        navigate={navigate}
                       />
-                      <Metric
-                        label="Total posted spend"
-                        value={fmt(data.spend_minor, currency, true)}
-                        icon={<ArrowUpRight size={19} />}
-                        note="Supported by balanced journals"
-                      />
-                      <Metric
-                        label="Committed spend"
-                        value={fmt(data.committed_minor, currency, true)}
-                        icon={<CircleDollarSign size={19} />}
-                        note="Approved, not yet posted"
-                      />
-                      <Metric
-                        label="Awaiting approval"
-                        value={String(data.pending).padStart(2, "0")}
-                        icon={<Clock3 size={19} />}
-                        note="Requests waiting on a review"
-                        highlight
-                      />
-                    </div>
-                    <div className="overview-grid">
-                      <section className="panel spend-panel">
-                        <div className="panel-heading">
-                          <div>
-                            <h2>Spend at a glance</h2>
-                            <p>Posted spend by category</p>
+                    )}
+                  {page === "Overview" && data && (
+                    <>
+                      <div className="metrics simple-dashboard-metrics">
+                        <Metric
+                          label="Total recorded costs"
+                          value={fmt(data.spend_minor, currency)}
+                          icon={<Receipt size={19} />}
+                          note="Expenses and salaries · counted once"
+                        />
+                        <Metric
+                          label="Still owed"
+                          value={fmt(
+                            data.record_summary?.owed_minor || 0,
+                            currency,
+                          )}
+                          icon={<Wallet size={19} />}
+                          note="Documented expenses and salaries"
+                        />
+                        <Metric
+                          label="Salary payments due"
+                          value={fmt(
+                            data.record_summary?.salary_owed_minor || 0,
+                            currency,
+                          )}
+                          icon={<Users size={19} />}
+                          note="Included in the amount still owed"
+                        />
+                      </div>
+                      <div className="dashboard-records-layout">
+                        <section className="panel dashboard-records">
+                          <div className="panel-heading">
+                            <div>
+                              <h2>Recent records</h2>
+                              <p>
+                                Latest expenses and salaries, with payment
+                                status.
+                              </p>
+                            </div>
+                            <button
+                              className="text-button"
+                              onClick={() => navigate("Reports")}
+                            >
+                              View reports <ArrowRight size={16} />
+                            </button>
                           </div>
-                          <span className="subtle-tag">October 2026</span>
-                        </div>
-                        <div className="spend-chart">
-                          <div className="chart-total">
-                            <span>Total posted spend</span>
-                            <strong>{fmt(data.spend_minor, currency)}</strong>
-                            <small>
-                              <span className="chart-dot" /> {current?.name}
-                            </small>
-                          </div>
-                          <div className="category-chart">
-                            {data.by_category
-                              .filter(
-                                (c: Row) => c.category !== "Government fees",
-                              )
-                              .map((c: Row, i: number) => (
-                                <div
-                                  className="category-bar-row"
-                                  key={c.category}
-                                >
-                                  <div>
-                                    <span>{c.category}</span>
-                                    <strong>
-                                      {fmt(c.amount_minor, currency, true)}
-                                    </strong>
-                                  </div>
-                                  <div className="bar-track">
-                                    <span
-                                      className={`bar bar-${i}`}
-                                      style={{
-                                        width: `${data.spend_minor ? Math.max(0, (c.amount_minor / data.spend_minor) * 100) : 0}%`,
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                        <div className="chart-footer">
-                          <ShieldCheck size={14} />
-                          Every figure comes from a posted, balanced journal.
-                          <button onClick={() => navigate("Reports")}>
-                            View reports
-                            <ArrowRight size={14} />
-                          </button>
-                        </div>
-                      </section>
-                      <section className="panel attention-panel">
-                        <div className="panel-heading">
-                          <div>
-                            <h2>Needs your attention</h2>
-                            <p>A little review keeps things moving.</p>
-                          </div>
-                          <span className="attention-dot" />
-                        </div>
-                        <button
-                          className="attention-row"
-                          onClick={() => navigate("Approvals")}
+                          {data.documented_recent?.length ? (
+                            <div className="table-scroll">
+                              <table>
+                                <thead>
+                                  <tr>
+                                    <th>Description</th>
+                                    <th>Payee</th>
+                                    <th>Cost</th>
+                                    <th>Status</th>
+                                    <th>
+                                      <span className="sr-only">Actions</span>
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {data.documented_recent.map((r: Row) => (
+                                    <tr key={r.id}>
+                                      <td>
+                                        {r.description}
+                                        <small>{r.date}</small>
+                                      </td>
+                                      <td>{r.payee}</td>
+                                      <td>{fmt(r.amount_minor, currency)}</td>
+                                      <td>
+                                        <span
+                                          className={`dashboard-record-status ${r.outstanding_minor === 0 ? "is-paid" : "is-due"}`}
+                                        >
+                                          {r.outstanding_minor === 0
+                                            ? "Paid"
+                                            : r.outstanding_minor <
+                                                r.amount_minor
+                                              ? "Part paid"
+                                              : "Unpaid"}
+                                        </span>
+                                        {r.outstanding_minor > 0 && (
+                                          <small>
+                                            {fmt(r.outstanding_minor, currency)}{" "}
+                                            owed
+                                          </small>
+                                        )}
+                                      </td>
+                                      <td>
+                                        <button
+                                          className="button"
+                                          onClick={() =>
+                                            navigate(
+                                              r.kind === "salary"
+                                                ? "Payroll"
+                                                : "Expenses",
+                                            )
+                                          }
+                                        >
+                                          View records
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <Empty title="Your workspace is ready">
+                              Record your first expense, or add an employee to
+                              start documenting salaries.
+                            </Empty>
+                          )}
+                        </section>
+                        <aside
+                          className="dashboard-sidebar"
+                          aria-label="Workspace shortcuts and outstanding payments"
                         >
-                          <span className="attention-icon yellow">
-                            <Clock3 size={19} />
-                          </span>
-                          <div>
-                            <strong>{data.pending} pending approvals</strong>
-                            <small>Review requests and receipts</small>
+                          <section className="panel dashboard-attention">
+                            <div className="dashboard-section-label">
+                              <Clock3 size={16} /> Payment overview
+                            </div>
+                            <h2>
+                              {data.record_summary?.owed_minor > 0
+                                ? "Payments to follow up"
+                                : "No outstanding payments"}
+                            </h2>
+                            <p>
+                              {data.record_summary?.owed_minor > 0
+                                ? "Amounts still owed on your recorded expenses and salaries."
+                                : "Your recorded expenses and salaries have no remaining balance."}
+                            </p>
+                            <button
+                              className="dashboard-balance-link"
+                              onClick={() => navigate("Expenses")}
+                            >
+                              <span>Expenses & bills</span>
+                              <strong>
+                                {fmt(
+                                  (data.record_summary?.owed_minor || 0) -
+                                    (data.record_summary?.salary_owed_minor ||
+                                      0),
+                                  currency,
+                                )}
+                              </strong>
+                              <ArrowRight size={16} />
+                            </button>
+                            <button
+                              className="dashboard-balance-link"
+                              onClick={() => navigate("Payroll")}
+                            >
+                              <span>Salaries</span>
+                              <strong>
+                                {fmt(
+                                  data.record_summary?.salary_owed_minor || 0,
+                                  currency,
+                                )}
+                              </strong>
+                              <ArrowRight size={16} />
+                            </button>
+                          </section>
+                          <section className="panel dashboard-shortcuts">
+                            <div className="dashboard-section-label">
+                              Quick access
+                            </div>
+                            {[
+                              {
+                                page: "Expenses",
+                                title: "Expenses & bills",
+                                note: "Record costs and payments",
+                                icon: <Receipt size={19} />,
+                              },
+                              {
+                                page: "Employees",
+                                title: "Employees",
+                                note: "Manage your team and salaries",
+                                icon: <Users size={19} />,
+                              },
+                              {
+                                page: "Payroll",
+                                title: "Payroll",
+                                note: "Record monthly salary payments",
+                                icon: <Wallet size={19} />,
+                              },
+                            ].map((item) => (
+                              <button
+                                key={item.page}
+                                className="dashboard-shortcut"
+                                onClick={() => navigate(item.page)}
+                              >
+                                <span className="dashboard-shortcut-icon">
+                                  {item.icon}
+                                </span>
+                                <span>
+                                  <strong>{item.title}</strong>
+                                  <small>{item.note}</small>
+                                </span>
+                                <ArrowRight size={16} />
+                              </button>
+                            ))}
+                          </section>
+                        </aside>
+                      </div>
+                      {spends.length > 0 && (
+                        <section className="panel">
+                          <div className="panel-heading">
+                            <h2>Approval workflow records</h2>
+                            <button
+                              className="button"
+                              onClick={() => {
+                                setAdvanced(true);
+                                navigate("Spend");
+                              }}
+                            >
+                              View approval requests
+                            </button>
                           </div>
-                          <ChevronRight size={16} />
-                        </button>
-                        <button
-                          className="attention-row"
-                          onClick={() => navigate("Payments")}
-                        >
-                          <span className="attention-icon blue">
-                            <Landmark size={19} />
-                          </span>
-                          <div>
-                            <strong>
-                              {data.unreconciled} payment
-                              {data.unreconciled === 1 ? "" : "s"} to reconcile
-                            </strong>
-                            <small>Match to a statement reference</small>
-                          </div>
-                          <ChevronRight size={16} />
-                        </button>
-                        <div className="close-note">
-                          <div>
-                            <ShieldCheck size={17} />
-                            <strong>October books are open</strong>
-                          </div>
-                          <p>
-                            Keep the paper trail complete as you go. Month-end
-                            will thank you.
-                          </p>
-                          <button onClick={() => navigate("Audit trail")}>
-                            Check the audit trail
-                            <ArrowUpRight size={14} />
-                          </button>
-                        </div>
-                      </section>
-                    </div>
-                    <section className="panel">
+                          <SpendTable rows={data.recent} short />
+                        </section>
+                      )}
+                    </>
+                  )}
+                  {["Spend", "Approvals", "Payments"].includes(page) && (
+                    <section className="panel finance-workspace spend-workspace">
                       <div className="panel-heading">
                         <div>
                           <h2>
-                            Recent transactions{" "}
-                            <span className="count-pill">{spends.length}</span>
+                            {page === "Spend"
+                              ? "Expense register"
+                              : page === "Approvals"
+                                ? "Approval queue"
+                                : "Payment queue"}
                           </h2>
-                          <p>The latest across your workspace.</p>
-                        </div>
-                        <button
-                          className="text-button"
-                          onClick={() => navigate("Spend")}
-                        >
-                          View all transactions
-                          <ArrowRight size={15} />
-                        </button>
-                      </div>
-                      <SpendTable rows={data.recent} short />
-                    </section>
-                    <div className="bottom-note">
-                      <ShieldCheck size={15} />
-                      <span>
-                        One workspace. Two entities. A complete paper trail.
-                      </span>
-                      <span>
-                        All amounts in {currency} · Synthetic test records
-                      </span>
-                    </div>
-                  </>
-                )}
-                {["Spend", "Approvals", "Payments"].includes(page) && (
-                  <section className="panel">
-                    <div className="list-toolbar">
-                      <div className="table-tabs">
-                        <button
-                          className={filter === "all" ? "selected" : ""}
-                          onClick={() => setFilter("all")}
-                        >
-                          All{" "}
-                          {page === "Approvals"
-                            ? "approvals"
-                            : page === "Payments"
-                              ? "payments"
-                              : "transactions"}
-                          <span>{filtered.length}</span>
-                        </button>
-                        {page === "Spend" && (
-                          <>
-                            <button
-                              className={filter === "draft" ? "selected" : ""}
-                              onClick={() => setFilter("draft")}
-                            >
-                              Drafts
-                            </button>
-                            <button
-                              className={
-                                filter === "approved" ? "selected" : ""
-                              }
-                              onClick={() => setFilter("approved")}
-                            >
-                              Approved
-                            </button>
-                          </>
-                        )}
-                      </div>
-                      <div className="table-tools">
-                        <div className="search">
-                          <Search size={16} />
-                          <input
-                            aria-label="Search transactions"
-                            placeholder="Search transactions…"
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                          />
-                        </div>
-                        <a
-                          className="button secondary small"
-                          href={exportLink(
-                            page === "Payments" ? "payments" : "spend",
-                          )}
-                        >
-                          <Download size={15} />
-                          Export CSV
-                        </a>
-                      </div>
-                    </div>
-                    {page === "Payments" && (
-                      <div className="inline-note">
-                        <LockKeyhole size={16} />
-                        Test file export only. Payments require a separate
-                        releaser and synthetic bank confirmation. No money
-                        moves.
-                      </div>
-                    )}
-                    <SpendTable rows={filtered} />
-                  </section>
-                )}
-                {page === "Payments" &&
-                  ["finance", "reconciler", "auditor", "cfo"].includes(
-                    user?.role || "",
-                  ) && (
-                    <BankImport
-                      entity={entity}
-                      currency={currency}
-                      role={user?.role || ""}
-                    />
-                  )}
-                {page === "Budgets" && Array.isArray(data) && (
-                  <>
-                    <div className="metrics three">
-                      <Metric
-                        label="Approved sample budget"
-                        value={fmt(
-                          data.reduce(
-                            (n: number, b: Row) => n + b.amount_minor,
-                            0,
-                          ),
-                          currency,
-                          true,
-                        )}
-                        icon={<PieChart size={19} />}
-                        note="October 2026 · entity currency"
-                      />
-                      <Metric
-                        label="Committed + actual"
-                        value={fmt(
-                          data.reduce(
-                            (n: number, b: Row) =>
-                              n + b.committed_minor + b.actual_minor,
-                            0,
-                          ),
-                          currency,
-                          true,
-                        )}
-                        icon={<Wallet size={19} />}
-                        note="Commitments exclude posted spend"
-                      />
-                      <Metric
-                        label="Available to spend"
-                        value={fmt(
-                          data.reduce(
-                            (n: number, b: Row) => n + b.remaining_minor,
-                            0,
-                          ),
-                          currency,
-                          true,
-                        )}
-                        icon={<CircleDollarSign size={19} />}
-                        note="Budget less committed and actual"
-                      />
-                    </div>
-                    <section className="panel">
-                      <div className="panel-heading">
-                        <div>
-                          <h2>Department budgets</h2>
                           <p>
-                            Synthetic policy amounts. Founder approval required
-                            before live use.
+                            {page === "Spend"
+                              ? "Expenses, vendor bills and spend requests in one place."
+                              : page === "Approvals"
+                                ? "Open a request to review its details, evidence and approval history."
+                                : "Track scheduled payments, confirmations and bank reconciliation."}
                           </p>
                         </div>
+                      </div>
+                      <div className="list-toolbar">
+                        <div
+                          className="table-tabs"
+                          aria-label="Expense filters"
+                        >
+                          <button
+                            className={filter === "all" ? "selected" : ""}
+                            aria-pressed={filter === "all"}
+                            onClick={() => setFilter("all")}
+                          >
+                            All{" "}
+                            {page === "Approvals"
+                              ? "approvals"
+                              : page === "Payments"
+                                ? "payments"
+                                : "transactions"}
+                            <span>{filtered.length}</span>
+                          </button>
+                          {page === "Spend" && (
+                            <>
+                              <button
+                                className={filter === "draft" ? "selected" : ""}
+                                aria-pressed={filter === "draft"}
+                                onClick={() => setFilter("draft")}
+                              >
+                                Drafts
+                              </button>
+                              <button
+                                className={
+                                  filter === "approved" ? "selected" : ""
+                                }
+                                aria-pressed={filter === "approved"}
+                                onClick={() => setFilter("approved")}
+                              >
+                                Approved
+                              </button>
+                              <button
+                                className={
+                                  filter === "missing" ? "selected" : ""
+                                }
+                                aria-pressed={filter === "missing"}
+                                onClick={() => setFilter("missing")}
+                              >
+                                Missing receipts
+                              </button>
+                              <button
+                                className={filter === "owed" ? "selected" : ""}
+                                aria-pressed={filter === "owed"}
+                                onClick={() => setFilter("owed")}
+                              >
+                                Reimbursements due
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        <div className="table-tools">
+                          <div className="search">
+                            <Search size={16} />
+                            <input
+                              aria-label="Search transactions"
+                              placeholder="Search transactions…"
+                              value={search}
+                              onChange={(e) => setSearch(e.target.value)}
+                            />
+                          </div>
+                          <a
+                            className="button secondary small"
+                            href={exportLink(
+                              page === "Payments" ? "payments" : "spend",
+                            )}
+                          >
+                            <Download size={15} />
+                            Export CSV
+                          </a>
+                        </div>
+                      </div>
+                      {page === "Spend" && (
+                        <div className="expense-filters">
+                          <label>
+                            Paid by
+                            <Select
+                              aria-label="Filter paid by"
+                              value={sourceFilter}
+                              onChange={(e) => setSourceFilter(e.target.value)}
+                            >
+                              <option value="all">All payment sources</option>
+                              <option value="company">Jaye</option>
+                              <option value="employee">Employee</option>
+                              <option value="founder">Founder</option>
+                            </Select>
+                          </label>
+                          <label>
+                            Category
+                            <Select
+                              aria-label="Filter category"
+                              value={categoryFilter}
+                              onChange={(e) =>
+                                setCategoryFilter(e.target.value)
+                              }
+                            >
+                              <option value="all">All categories</option>
+                              {cats.map((c) => (
+                                <option key={c}>{c}</option>
+                              ))}
+                            </Select>
+                          </label>
+                          <label>
+                            From
+                            <input
+                              aria-label="From date"
+                              type="date"
+                              value={fromDate}
+                              onChange={(e) => setFromDate(e.target.value)}
+                            />
+                          </label>
+                          <label>
+                            To
+                            <input
+                              aria-label="To date"
+                              type="date"
+                              value={toDate}
+                              onChange={(e) => setToDate(e.target.value)}
+                            />
+                          </label>
+                          <button
+                            className="button secondary small"
+                            onClick={() => {
+                              setSourceFilter("all");
+                              setCategoryFilter("all");
+                              setFromDate("");
+                              setToDate("");
+                              setFilter("all");
+                              setSearch("");
+                            }}
+                          >
+                            Clear filters
+                          </button>
+                          <span className="micro">
+                            CSV exports all accessible expenses for this entity.
+                          </span>
+                        </div>
+                      )}
+                      {page === "Payments" && (
+                        <div className="inline-note">
+                          <LockKeyhole size={16} />
+                          Record payments made outside Jaye, then match them to
+                          bank statements.
+                        </div>
+                      )}
+                      <SpendTable rows={filtered} />
+                    </section>
+                  )}
+                  {page === "Payments" &&
+                    ["finance", "reconciler", "auditor", "cfo"].includes(
+                      user?.role || "",
+                    ) && (
+                      <BankImport
+                        entity={entity}
+                        currency={currency}
+                        role={user?.role || ""}
+                      />
+                    )}
+                  {page === "Budgets" && Array.isArray(data) && (
+                    <div className="finance-workspace budgets-workspace">
+                      <div className="metrics three">
+                        <Metric
+                          label="Approved sample budget"
+                          value={fmt(
+                            data.reduce(
+                              (n: number, b: Row) => n + b.amount_minor,
+                              0,
+                            ),
+                            currency,
+                            true,
+                          )}
+                          icon={<PieChart size={19} />}
+                          note="October 2026 · entity currency"
+                        />
+                        <Metric
+                          label="Committed + actual"
+                          value={fmt(
+                            data.reduce(
+                              (n: number, b: Row) =>
+                                n + b.committed_minor + b.actual_minor,
+                              0,
+                            ),
+                            currency,
+                            true,
+                          )}
+                          icon={<Wallet size={19} />}
+                          note="Commitments exclude posted spend"
+                        />
+                        <Metric
+                          label="Available to spend"
+                          value={fmt(
+                            data.reduce(
+                              (n: number, b: Row) => n + b.remaining_minor,
+                              0,
+                            ),
+                            currency,
+                            true,
+                          )}
+                          icon={<CircleDollarSign size={19} />}
+                          note="Budget less committed and actual"
+                        />
+                      </div>
+                      <section className="panel budgets-panel">
+                        <div className="panel-heading">
+                          <div>
+                            <h2>Department budgets</h2>
+                            <p>
+                              Track department allocations, commitments and
+                              actual spend.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="table-scroll">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Budget line</th>
+                                <th className="number">Budget</th>
+                                <th className="number">Committed</th>
+                                <th className="number">Actual</th>
+                                <th className="number">Remaining</th>
+                                <th>Utilization</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {data.map((b: Row) => (
+                                <tr key={b.id}>
+                                  <td>
+                                    <button
+                                      className="record-link"
+                                      onClick={() =>
+                                        setRegisterDetail({
+                                          kind: "budget",
+                                          record: b,
+                                        })
+                                      }
+                                    >
+                                      {b.department}
+                                      <ArrowUpRight size={14} />
+                                    </button>
+                                    <small>{b.category}</small>
+                                  </td>
+                                  <td className="number">
+                                    {fmt(b.amount_minor, currency)}
+                                  </td>
+                                  <td className="number">
+                                    {fmt(b.committed_minor, currency)}
+                                  </td>
+                                  <td className="number">
+                                    {fmt(b.actual_minor, currency)}
+                                  </td>
+                                  <td className="number">
+                                    {fmt(b.remaining_minor, currency)}
+                                  </td>
+                                  <td>
+                                    <div className="budget-meter">
+                                      <span
+                                        style={{
+                                          width: `${b.amount_minor > 0 ? Math.max(0, Math.min(100, ((b.committed_minor + b.actual_minor) / b.amount_minor) * 100)) : 0}%`,
+                                        }}
+                                      />
+                                    </div>
+                                    <small>
+                                      {b.amount_minor > 0
+                                        ? `${Math.round(((b.committed_minor + b.actual_minor) / b.amount_minor) * 100)}% used`
+                                        : "No budget set"}
+                                    </small>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
+                    </div>
+                  )}
+                  {page === "Vendors" && (
+                    <section className="panel finance-workspace vendors-workspace">
+                      <div className="panel-heading">
+                        <div>
+                          <h2>
+                            Supplier directory{" "}
+                            <span className="count-pill">{vendors.length}</span>
+                          </h2>
+                          <p>
+                            Businesses and suppliers you pay. Add a supplier
+                            once, then reuse it in Expenses.
+                          </p>
+                        </div>
+                        {user?.role === "finance" && (
+                          <button
+                            className="button primary small"
+                            onClick={() => setModal("vendor")}
+                          >
+                            <Plus size={15} />
+                            Add supplier
+                          </button>
+                        )}
                       </div>
                       <div className="table-scroll">
                         <table>
                           <thead>
                             <tr>
-                              <th>Budget line</th>
-                              <th className="number">Budget</th>
-                              <th className="number">Committed</th>
-                              <th className="number">Actual</th>
-                              <th className="number">Remaining</th>
-                              <th>Utilization</th>
+                              <th>Supplier</th>
+                              <th>Category</th>
+                              <th>Due diligence</th>
+                              <th>Related party</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {data.map((b: Row) => (
-                              <tr key={b.id}>
+                            {vendors.map((v) => (
+                              <tr key={v.id}>
                                 <td>
-                                  <strong>{b.department}</strong>
-                                  <small>{b.category}</small>
-                                </td>
-                                <td className="number">
-                                  {fmt(b.amount_minor, currency)}
-                                </td>
-                                <td className="number">
-                                  {fmt(b.committed_minor, currency)}
-                                </td>
-                                <td className="number">
-                                  {fmt(b.actual_minor, currency)}
-                                </td>
-                                <td className="number">
-                                  {fmt(b.remaining_minor, currency)}
-                                </td>
-                                <td>
-                                  <div className="budget-meter">
-                                    <span
-                                      style={{
-                                        width: `${Math.min(100, ((b.committed_minor + b.actual_minor) / b.amount_minor) * 100)}%`,
-                                      }}
-                                    />
+                                  <div className="transaction">
+                                    <span className="vendor-icon">
+                                      {initials(v.name)}
+                                    </span>
+                                    <div>
+                                      <button
+                                        className="record-link"
+                                        onClick={() =>
+                                          setRegisterDetail({
+                                            kind: "vendor",
+                                            record: v,
+                                          })
+                                        }
+                                      >
+                                        {v.name}
+                                        <ArrowUpRight size={14} />
+                                      </button>
+                                      <small>{v.id}</small>
+                                    </div>
                                   </div>
-                                  <small>
-                                    {Math.round(
-                                      ((b.committed_minor + b.actual_minor) /
-                                        b.amount_minor) *
-                                        100,
-                                    )}
-                                    % used
-                                  </small>
+                                </td>
+                                <td>{v.category}</td>
+                                <td>
+                                  <FinanceStatus status={v.status} />
+                                </td>
+                                <td>
+                                  {v.related_party
+                                    ? "Yes · independent review"
+                                    : "No"}
                                 </td>
                               </tr>
                             ))}
@@ -1081,281 +1800,143 @@ export default function Home() {
                         </table>
                       </div>
                     </section>
-                  </>
-                )}
-                {page === "Vendors" && (
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <div>
-                        <h2>
-                          Vendor directory{" "}
-                          <span className="count-pill">{vendors.length}</span>
-                        </h2>
-                        <p>
-                          Entity-specific records. Sensitive bank details are
-                          not stored in this local build.
-                        </p>
-                      </div>
-                      {user?.role === "finance" && (
-                        <button
-                          className="button primary small"
-                          onClick={() => setModal("vendor")}
-                        >
-                          <Plus size={15} />
-                          Add vendor
-                        </button>
-                      )}
-                    </div>
-                    <div className="table-scroll">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Vendor</th>
-                            <th>Category</th>
-                            <th>Due diligence</th>
-                            <th>Related party</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {vendors.map((v) => (
-                            <tr key={v.id}>
-                              <td>
-                                <div className="transaction">
-                                  <span className="vendor-icon">
-                                    {initials(v.name)}
-                                  </span>
-                                  <div>
-                                    <strong>{v.name}</strong>
-                                    <small>{v.id}</small>
-                                  </div>
-                                </div>
-                              </td>
-                              <td>{v.category}</td>
-                              <td>
-                                <span className="subtle-tag">
-                                  {v.status.replaceAll("_", " ")}
-                                </span>
-                              </td>
-                              <td>
-                                {v.related_party
-                                  ? "Yes · independent review"
-                                  : "No"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                )}
-                {page === "General ledger" && Array.isArray(data) && (
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <div>
-                        <h2>
-                          Posted journals{" "}
-                          <span className="count-pill">{data.length}</span>
-                        </h2>
-                        <p>
-                          Append-only entries · integer minor units ·
-                          entity-scoped numbering
-                        </p>
-                      </div>
-                      <span className="balanced">
-                        <Check size={14} />
-                        Balanced
-                      </span>
-                    </div>
-                    {data.map((j: Row) => (
-                      <div className="journal" key={j.id}>
-                        <div className="journal-title">
-                          <div>
-                            <strong>
-                              JE-{j.year}-{String(j.number).padStart(5, "0")}
-                            </strong>
-                            <span>{j.description}</span>
-                          </div>
-                          <div>
-                            <small>{day(j.date)}</small>
-                            {j.source_id && (
-                              <button
-                                className="text-button"
-                                onClick={() => openDetail(j.source_id)}
-                              >
-                                Source record
-                                <ArrowUpRight size={13} />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Account</th>
-                              <th className="number">Debit</th>
-                              <th className="number">Credit</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {j.lines.map((l: Row) => (
-                              <tr key={l.id}>
-                                <td>
-                                  <span className="account-code">
-                                    {l.account}
-                                  </span>
-                                  {l.account_name}
-                                </td>
-                                <td className="number">
-                                  {l.debit ? fmt(l.debit, currency) : "—"}
-                                </td>
-                                <td className="number">
-                                  {l.credit ? fmt(l.credit, currency) : "—"}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ))}
-                  </section>
-                )}
-                {page === "Reports" && Array.isArray(data) && (
-                  <Reports
-                    rows={data}
-                    currency={currency}
-                    exportUrl={exportLink("trial-balance")}
-                  />
-                )}
-                {page === "Audit trail" && data && (
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <div>
-                        <h2>Audit events</h2>
-                        <p>
-                          Hash-chained records. Updates and deletes are blocked
-                          by the database.
-                        </p>
-                      </div>
-                      <span
-                        className={`balanced ${!data.valid ? "invalid" : ""}`}
-                      >
-                        <ShieldCheck size={15} />
-                        {data.valid ? "Chain verified" : "Integrity failure"}
-                      </span>
-                    </div>
-                    <div className="table-scroll">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Event</th>
-                            <th>Actor</th>
-                            <th>Source record</th>
-                            <th>Time</th>
-                            <th>Hash</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {data.events.map((a: Row) => (
-                            <tr key={a.id}>
-                              <td>
-                                <strong>{a.action}</strong>
-                              </td>
-                              <td>{a.actor || a.actor_id}</td>
-                              <td>{a.resource_id}</td>
-                              <td>{new Date(a.created_at).toLocaleString()}</td>
-                              <td>
-                                <code title={a.hash}>
-                                  {a.hash.slice(0, 14)}…
-                                </code>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                )}
-                {page === "Settings" && (
-                  <div className="settings-grid">
-                    <section className="panel">
+                  )}
+                  {page === "General ledger" && Array.isArray(data) && (
+                    <section className="panel finance-workspace ledger-workspace">
                       <div className="panel-heading">
                         <div>
-                          <h2>Environment & controls</h2>
+                          <h2>
+                            Posted journals{" "}
+                            <span className="count-pill">{data.length}</span>
+                          </h2>
                           <p>
-                            Local shadow build · read-only configuration summary
+                            Posted entries and account balances for this entity.
                           </p>
                         </div>
+                        <span
+                          className={`balanced ${data.some((j: Row) => j.lines.reduce((n: number, l: Row) => n + l.debit - l.credit, 0) !== 0) ? "invalid" : ""}`}
+                        >
+                          <Check size={14} />
+                          {data.some(
+                            (j: Row) =>
+                              j.lines.reduce(
+                                (n: number, l: Row) => n + l.debit - l.credit,
+                                0,
+                              ) !== 0,
+                          )
+                            ? "Review required"
+                            : "Balanced"}
+                        </span>
                       </div>
-                      {[
-                        [
-                          "Data",
-                          "Synthetic fixtures + your local test entries",
-                        ],
-                        [
-                          "Storage",
-                          "SQLite WAL · persistent local data directory",
-                        ],
-                        [
-                          "Evidence",
-                          "AES-256-GCM encrypted · signature-checked uploads",
-                        ],
-                        [
-                          "Identity",
-                          "Local test identities · SSO/MFA not integrated",
-                        ],
-                        ["Money", "Integer minor units · USD / NGN per entity"],
-                        [
-                          "Payments",
-                          "Synthetic confirmation only · no provider connection",
-                        ],
-                        [
-                          "Audit",
-                          "Append-only hash chain · verify in Audit trail",
-                        ],
-                        [
-                          "Production",
-                          "Disabled · accountant / CPA / CFO sign-off required",
-                        ],
-                      ].map(([k, v]) => (
-                        <div className="setting-row" key={k}>
-                          <strong>{k}</strong>
-                          <span>{v}</span>
+                      {data.map((j: Row) => (
+                        <div className="journal" key={j.id}>
+                          <div className="journal-title">
+                            <div>
+                              <button
+                                className="record-link"
+                                onClick={() =>
+                                  setRegisterDetail({
+                                    kind: "journal",
+                                    record: j,
+                                  })
+                                }
+                              >
+                                JE-{j.year}-{String(j.number).padStart(5, "0")}
+                                <ArrowUpRight size={14} />
+                              </button>
+                              <span>{j.description}</span>
+                            </div>
+                            <div>
+                              <small>{day(j.date)}</small>
+                              {j.source_id && (
+                                <button
+                                  className="text-button"
+                                  onClick={() => openDetail(j.source_id)}
+                                >
+                                  Source record
+                                  <ArrowUpRight size={13} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="table-scroll">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>Account</th>
+                                  <th className="number">Debit</th>
+                                  <th className="number">Credit</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {j.lines.map((l: Row) => (
+                                  <tr key={l.id}>
+                                    <td>
+                                      <span className="account-code">
+                                        {l.account}
+                                      </span>
+                                      {l.account_name}
+                                    </td>
+                                    <td className="number">
+                                      {l.debit ? fmt(l.debit, currency) : "—"}
+                                    </td>
+                                    <td className="number">
+                                      {l.credit ? fmt(l.credit, currency) : "—"}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       ))}
+                      {data.length === 0 && (
+                        <Empty title="No posted journals yet">
+                          Entries appear here after transactions are posted.
+                        </Empty>
+                      )}
                     </section>
-                    <section className="panel">
-                      <div className="panel-heading">
-                        <div>
-                          <h2>Next approval gates</h2>
-                          <p>Recorded in OPEN_DECISIONS.md</p>
-                        </div>
-                      </div>
-                      <div className="gate-list">
-                        {[
-                          "Expense policies & approval bands",
-                          "Charts of accounts & reporting framework",
-                          "FX sources & consolidation policy",
-                          "SSO / MFA & PostgreSQL migration",
-                          "Payroll rules & adviser golden datasets",
-                          "Parallel run & auditor walkthrough",
-                        ].map((v) => (
-                          <div key={v}>
-                            <LockKeyhole size={16} />
-                            {v}
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  </div>
-                )}
-              </>
-            )
-          )}
+                  )}
+                  {page === "Reports" && Array.isArray(data) && (
+                    <>
+                      <Reporting
+                        key={`${entity}:${user?.id}`}
+                        entity={entity}
+                        currency={currency}
+                        user={user!}
+                        request={api}
+                        onExpense={openDetail}
+                        onChanged={() => {
+                          api(`/reports/trial-balance?entity=${entity}`)
+                            .then(setData)
+                            .catch((e) => setError(e.message));
+                        }}
+                        onRecord={openRecord}
+                      />
+                      <Reports
+                        rows={data}
+                        currency={currency}
+                        exportUrl={exportLink("trial-balance")}
+                      />
+                    </>
+                  )}
+                  {page === "Audit trail" && data && (
+                    <AuditTrail
+                      key={`${entity}:${user?.id}`}
+                      data={data}
+                      entityName={current?.name || entity}
+                    />
+                  )}
+                  {page === "Settings" && <SettingsControls />}
+                </>
+              )
+            )}
+          </div>
         </main>
         <footer>
           <span className="footer-brand">jaye finance</span>
           <span>Clarity in every transaction.</span>
-          <span>Local development · v0.1</span>
+          <span>Jaye Finance</span>
         </footer>
       </div>
       {toast && (
@@ -1370,162 +1951,13 @@ export default function Home() {
           </button>
         </div>
       )}
-      {detail && (
-        <div
-          className="drawer-overlay"
-          onMouseDown={(e) => e.target === e.currentTarget && setDetail(null)}
-        >
-          <section
-            className="drawer"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Spend details"
-          >
-            <div className="drawer-top">
-              <span className="kicker">TRANSACTION DETAILS</span>
-              <button
-                className="icon-button"
-                onClick={() => setDetail(null)}
-                aria-label="Close details"
-              >
-                <X size={21} />
-              </button>
-            </div>
-            <div className="drawer-hero">
-              <span className="vendor-icon large">
-                <Receipt size={24} />
-              </span>
-              <h2>{detail.description}</h2>
-              <p>{detail.vendor}</p>
-              <strong>{fmt(detail.amount_minor, detail.currency)}</strong>
-              <Badge status={detail.status} />
-            </div>
-            <div className="detail-grid">
-              {[
-                ["Record", detail.id],
-                ["Type", detail.kind],
-                ["Entity", current?.name],
-                [
-                  "Requester",
-                  users.find((u) => u.id === detail.requester_id)?.name,
-                ],
-                ["Department", detail.department],
-                ["Category", detail.category],
-                ["Transaction date", detail.date],
-                ["Purpose", detail.purpose],
-                ...(detail.payment_reference
-                  ? [["Bank confirmation", detail.payment_reference]]
-                  : []),
-                ...(detail.reconciliation_reference
-                  ? [["Statement reference", detail.reconciliation_reference]]
-                  : []),
-              ].map(([k, v]) => (
-                <div key={k}>
-                  <span>{k}</span>
-                  <strong>{v}</strong>
-                </div>
-              ))}
-            </div>
-            {detail.warnings.length > 0 && (
-              <div className="warnings">
-                <h3>
-                  <AlertCircle size={16} />
-                  Policy checks
-                </h3>
-                {detail.warnings.map((w: string) => (
-                  <p key={w}>{w}</p>
-                ))}
-              </div>
-            )}
-            <div className="detail-section">
-              <h3>
-                Supporting evidence <span>{detail.receipts.length}</span>
-              </h3>
-              {detail.receipts.map((r: Row) => (
-                <a
-                  className="receipt-file"
-                  href={`/api/receipts/${r.id}`}
-                  key={r.id}
-                >
-                  <FileText size={20} />
-                  <div>
-                    <strong>{r.filename}</strong>
-                    <small>
-                      {r.synthetic
-                        ? "Synthetic fixture · not a real invoice"
-                        : "Encrypted original · immutable evidence"}
-                    </small>
-                  </div>
-                  <Download size={16} />
-                </a>
-              ))}
-              {!detail.receipts.length && (
-                <p className="muted">No supporting evidence attached.</p>
-              )}
-              {user?.id === detail.requester_id &&
-                ["draft", "returned"].includes(detail.status) && (
-                  <label className="upload-inline">
-                    <Upload size={16} />
-                    Attach receipt
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,application/pdf"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const form = new FormData();
-                        form.append("file", file);
-                        try {
-                          await api(`/spends/${detail.id}/receipt`, {
-                            method: "POST",
-                            body: form,
-                          });
-                          await openDetail(detail.id);
-                          notify("Evidence encrypted and attached.");
-                        } catch (err) {
-                          notify((err as Error).message);
-                        }
-                      }}
-                    />
-                  </label>
-                )}
-            </div>
-            <Workflow
-              detail={detail}
-              user={user}
-              busy={busy}
-              onAction={perform}
-              onConvert={() => setModal("convert")}
-            />
-            <div className="detail-section">
-              <h3>Activity & approvals</h3>
-              <div className="timeline">
-                {detail.history.map((h: Row) => (
-                  <div key={h.id}>
-                    <span className="timeline-dot" />
-                    <strong>
-                      {h.action.replace("spend.", "").replaceAll("_", " ")}
-                    </strong>
-                    <small>
-                      {h.actor} · {new Date(h.created_at).toLocaleString()}
-                    </small>
-                    {JSON.parse(h.details).comment && (
-                      <p>{JSON.parse(h.details).comment}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        </div>
-      )}
       {modal && (
         <div
           className="modal-overlay"
           onMouseDown={(e) => e.target === e.currentTarget && setModal("")}
         >
           <section
-            className="modal"
+            className={`modal spend-modal ${modal === "vendor" ? "vendor-modal" : ""}`}
             role="dialog"
             aria-modal="true"
             aria-label={modal === "vendor" ? "Add vendor" : "New spend"}
@@ -1537,10 +1969,12 @@ export default function Home() {
                 </span>
                 <h2>
                   {modal === "vendor"
-                    ? "Add a vendor"
-                    : modal === "convert"
-                      ? "Record bill against request"
-                      : "Every expense starts here."}
+                    ? "Add a supplier"
+                    : modal === "edit"
+                      ? "Edit expense details"
+                      : modal === "convert"
+                        ? "Record bill against request"
+                        : "New expense"}
                 </h2>
                 <p>
                   {modal === "vendor"
@@ -1562,7 +1996,7 @@ export default function Home() {
                 onDone={async () => {
                   setModal("");
                   await load();
-                  notify("Vendor created. Due diligence review required.");
+                  notify("Supplier saved. You can now select it in Expenses.");
                 }}
               />
             ) : (
@@ -1571,7 +2005,16 @@ export default function Home() {
                 currency={currency}
                 vendors={vendors}
                 parent={modal === "convert" ? detail : undefined}
+                initial={modal === "edit" ? detail : undefined}
+                users={users.filter(
+                  (u) =>
+                    u.entities.includes(entity) &&
+                    !["admin", "investor"].includes(u.role) &&
+                    (user?.role !== "employee" || u.id === user.id),
+                )}
+                userId={user?.id || ""}
                 onDone={async (id) => {
+                  setDetail(null);
                   setModal("");
                   await load();
                   await openDetail(id);
@@ -1603,7 +2046,13 @@ function Metric({
   return (
     <section className={`metric ${highlight ? "highlight" : ""}`}>
       <div className="metric-top">
-        <span>{label}</span>
+        <span>
+          {label === "Spend"
+            ? "Approval requests"
+            : label === "Payments"
+              ? "Payment approvals"
+              : label}
+        </span>
         <div>{icon}</div>
       </div>
       <strong className="metric-value">{value}</strong>
@@ -1644,7 +2093,26 @@ function Workflow({
     )[d.status] === role;
   return (
     <div className="workflow">
-      <h3>Next step</h3>
+      <h3>
+        {review
+          ? "Review expense"
+          : d.status === "scheduled"
+            ? "Payment confirmation"
+            : d.status === "paid"
+              ? "Bank reconciliation"
+              : d.status === "reconciled"
+                ? "Post payment"
+                : "Next step"}
+      </h3>
+      {d.kind !== "request" && (
+        <p>
+          {d.payment_source !== "company"
+            ? "This personal purchase is reimbursable. Payment settles the amount owed to the named person, not another vendor bill."
+            : d.original_paid_date
+              ? "Jaye has already paid. Verify the original reference and match the statement; this item is excluded from payment exports."
+              : "Jaye will pay the vendor directly after approval."}
+        </p>
+      )}
       {d.status === "approved" && d.kind === "request" ? (
         <>
           <p>
@@ -1673,11 +2141,14 @@ function Workflow({
             )}
           {review && (
             <>
-              <textarea
-                placeholder="Review comment (required to return or reject)"
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-              />
+              <label className="review-comment">
+                Review comment
+                <textarea
+                  placeholder="Required to return or reject"
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                />
+              </label>
               <div className="action-buttons">
                 <button
                   disabled={busy}
@@ -1710,7 +2181,11 @@ function Workflow({
               className="button primary"
               onClick={() => onAction("schedule")}
             >
-              Schedule test payment
+              {d.payment_source !== "company"
+                ? "Schedule reimbursement"
+                : d.original_paid_date
+                  ? "Queue existing payment verification"
+                  : "Schedule payment"}
               <ArrowRight size={16} />
             </button>
           )}
@@ -1719,10 +2194,10 @@ function Workflow({
             <>
               <label>
                 {d.status === "paid"
-                  ? "Synthetic statement row reference"
-                  : "Synthetic bank confirmation reference"}
+                  ? "Statement row reference"
+                  : "Bank confirmation reference"}
                 {d.status === "paid" ? (
-                  <select
+                  <Select
                     value={reference}
                     onChange={(e) => setReference(e.target.value)}
                   >
@@ -1734,7 +2209,7 @@ function Workflow({
                         {r.reference} · {r.date}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 ) : (
                   <input
                     placeholder="e.g. TEST-BANK-2026-001"
@@ -1754,11 +2229,12 @@ function Workflow({
               >
                 {d.status === "paid"
                   ? "Reconcile payment"
-                  : "Confirm simulated payment"}
+                  : "Record payment confirmation"}
                 <Check size={16} />
               </button>
               <p className="micro">
-                Local simulation only. No bank connection or money movement.
+                Records a payment made outside Jaye. This does not transfer
+                money.
               </p>
             </>
           )}
@@ -1805,7 +2281,7 @@ function Workflow({
                     returned: "the requester to make changes",
                   } as Row
                 )[d.status] || "the next authorized person"}
-                . Switch test identity to continue.
+                .
               </p>
             )}
         </>
@@ -1818,15 +2294,27 @@ function SpendForm({
   currency,
   vendors,
   parent,
+  initial,
+  users,
+  userId,
   onDone,
 }: {
   entity: string;
   currency: string;
   vendors: Row[];
   parent?: Row | null;
+  initial?: Row | null;
+  users: Row[];
+  userId: string;
   onDone: (id: string) => void;
 }) {
-  const [kind, setKind] = useState(parent ? "bill" : "expense"),
+  const [kind, setKind] = useState(
+      initial?.kind || (parent ? "bill" : "expense"),
+    ),
+    [paymentSource, setPaymentSource] = useState(
+      initial?.payment_source || "company",
+    ),
+    [companyPaid, setCompanyPaid] = useState(!!initial?.original_paid_date),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [savedId, setSavedId] = useState("");
@@ -1870,9 +2358,25 @@ function SpendForm({
         ...(f.get("invoice_number")
           ? { invoice_number: String(f.get("invoice_number")) }
           : {}),
-        ...(parent ? { parent_id: parent.id } : {}),
+        ...(parent || initial?.parent_id
+          ? { parent_id: parent?.id || initial?.parent_id }
+          : {}),
+        payment_source: kind === "request" ? "company" : paymentSource,
+        paid_by_id:
+          kind !== "request" && paymentSource !== "company"
+            ? String(f.get("paid_by_id"))
+            : "",
+        original_paid_date: String(f.get("original_paid_date") || ""),
+        original_payment_reference: String(
+          f.get("original_payment_reference") || "",
+        ),
+        payment_method: String(f.get("payment_method") || ""),
+        payment_account: String(f.get("payment_account") || ""),
+        invoice_date: String(f.get("invoice_date") || ""),
+        due_date: String(f.get("due_date") || ""),
+        ...(initial ? { expected_revision: initial.revision } : {}),
       };
-      const s = await api("/spends", {
+      const s = await api(initial ? `/spends/${initial.id}/edit` : "/spends", {
         method: "POST",
         body: JSON.stringify(payload),
       });
@@ -1894,14 +2398,15 @@ function SpendForm({
     <form onSubmit={submit} className="form">
       <div className="kind-picker">
         {[
-          ["expense", "Expense claim"],
+          ["expense", "Expense"],
           ["bill", "Vendor bill"],
           ["request", "Spend request"],
         ].map(([k, l]) => (
           <button
             type="button"
             key={k}
-            disabled={!!parent || !!savedId}
+            disabled={!!parent || !!initial || !!savedId}
+            aria-pressed={kind === k}
             className={kind === k ? "selected" : ""}
             onClick={() => setKind(k)}
           >
@@ -1928,7 +2433,7 @@ function SpendForm({
           maxLength={180}
           name="description"
           placeholder="What was this expense for?"
-          defaultValue={parent?.description}
+          defaultValue={initial?.description || parent?.description}
           disabled={!!savedId}
         />
       </label>
@@ -1940,7 +2445,11 @@ function SpendForm({
             name="amount"
             inputMode="decimal"
             placeholder="0.00"
-            defaultValue={parent ? (parent.amount_minor / 100).toFixed(2) : ""}
+            defaultValue={
+              initial || parent
+                ? ((initial || parent)!.amount_minor / 100).toFixed(2)
+                : ""
+            }
             disabled={!!savedId}
           />
         </label>
@@ -1950,17 +2459,19 @@ function SpendForm({
             required
             name="date"
             type="date"
-            defaultValue="2026-10-19"
+            defaultValue={
+              initial?.date || new Date().toLocaleDateString("en-CA")
+            }
             disabled={!!savedId}
           />
         </label>
       </div>
       <label>
         Vendor
-        <select
+        <Select
           required
           name="vendor_id"
-          defaultValue={parent?.vendor_id || ""}
+          defaultValue={initial?.vendor_id || parent?.vendor_id || ""}
           disabled={!!savedId}
         >
           <option value="" disabled>
@@ -1971,44 +2482,167 @@ function SpendForm({
               {v.name}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
       <div className="form-row">
         <label>
           Department
-          <select
+          <Select
             name="department"
-            defaultValue={parent?.department || "Operations"}
+            defaultValue={
+              initial?.department || parent?.department || "Operations"
+            }
             disabled={!!savedId}
           >
             {departments.map((d) => (
               <option key={d}>{d}</option>
             ))}
-          </select>
+          </Select>
         </label>
         <label>
           Category
-          <select
+          <Select
             name="category"
-            defaultValue={parent?.category || "Operations"}
+            defaultValue={initial?.category || parent?.category || "Operations"}
             disabled={!!savedId}
           >
             {cats.map((c) => (
               <option key={c}>{c}</option>
             ))}
-          </select>
+          </Select>
         </label>
       </div>
-      {kind === "bill" && (
+      {kind !== "request" && (
         <label>
           Invoice number
           <input
-            required
+            required={kind === "bill"}
+            defaultValue={initial?.invoice_number || ""}
             name="invoice_number"
             placeholder="INV-2026-001"
             disabled={!!savedId}
           />
         </label>
+      )}
+      {kind !== "request" && (
+        <>
+          <div className="form-row">
+            <label>
+              Invoice date
+              <input
+                type="date"
+                name="invoice_date"
+                defaultValue={initial?.invoice_date}
+                disabled={!!savedId}
+              />
+            </label>
+            <label>
+              Due date
+              <input
+                type="date"
+                name="due_date"
+                defaultValue={initial?.due_date}
+                disabled={!!savedId}
+              />
+            </label>
+          </div>
+          <fieldset className="payment-fields" disabled={!!savedId}>
+            <legend>Payment responsibility</legend>
+            <label>
+              Who pays for this expense?
+              <Select
+                value={paymentSource}
+                onChange={(e) => setPaymentSource(e.target.value)}
+              >
+                <option value="company">Jaye pays directly</option>
+                <option value="employee">Employee paid personally</option>
+                <option value="founder">Founder paid personally</option>
+              </Select>
+            </label>
+            {paymentSource === "company" ? (
+              <label>
+                Company payment
+                <Select
+                  value={companyPaid ? "paid" : "unpaid"}
+                  onChange={(e) => setCompanyPaid(e.target.value === "paid")}
+                >
+                  <option value="unpaid">Not paid yet</option>
+                  <option value="paid">
+                    Already paid — record for verification
+                  </option>
+                </Select>
+              </label>
+            ) : (
+              <>
+                <label>
+                  Person to reimburse
+                  <Select
+                    required
+                    name="paid_by_id"
+                    defaultValue={initial?.paid_by_id || userId}
+                  >
+                    {users.map((u) => (
+                      <option value={u.id} key={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <p className="micro">
+                  Record a repayable business purchase. Founder loans and
+                  capital contributions belong in a separate funding workflow.
+                </p>
+              </>
+            )}
+            {(paymentSource !== "company" || companyPaid) && (
+              <>
+                <div className="form-row">
+                  <label>
+                    Original payment date
+                    <input
+                      required
+                      type="date"
+                      name="original_paid_date"
+                      defaultValue={initial?.original_paid_date || ""}
+                    />
+                  </label>
+                  <label>
+                    Payment method
+                    <Select
+                      required
+                      name="payment_method"
+                      defaultValue={initial?.payment_method || ""}
+                    >
+                      <option value="">Select method</option>
+                      <option value="bank_transfer">Bank transfer</option>
+                      <option value="card">Card</option>
+                      <option value="cash">Cash</option>
+                      <option value="other">Other</option>
+                    </Select>
+                  </label>
+                </div>
+                <label>
+                  Account / method label
+                  <input
+                    name="payment_account"
+                    maxLength={100}
+                    defaultValue={initial?.payment_account}
+                    placeholder="e.g. Jaye operating account or personal card (no account numbers)"
+                  />
+                </label>
+                <label>
+                  Original payment reference
+                  <input
+                    required={paymentSource === "company"}
+                    name="original_payment_reference"
+                    maxLength={120}
+                    defaultValue={initial?.original_payment_reference}
+                  />
+                </label>
+              </>
+            )}
+          </fieldset>
+        </>
       )}
       <label>
         Business purpose
@@ -2018,7 +2652,7 @@ function SpendForm({
           minLength={5}
           maxLength={1000}
           placeholder="Help the reviewer understand the business reason."
-          defaultValue={parent?.purpose}
+          defaultValue={initial?.purpose || parent?.purpose}
           disabled={!!savedId}
         />
       </label>
@@ -2084,35 +2718,39 @@ function VendorForm({
         }
       }}
     >
-      {error && <p className="error-banner">{error}</p>}
+      {error && (
+        <p className="error-banner" role="alert">
+          {error}
+        </p>
+      )}
       <label>
-        Legal name
+        Business or supplier name
         <input
           name="name"
           required
           minLength={2}
           maxLength={120}
-          placeholder="Vendor legal name"
+          placeholder="e.g. Internet provider or office supplier"
         />
       </label>
       <label>
         Category
-        <select name="category">
+        <Select name="category">
           {cats.map((c) => (
             <option key={c}>{c}</option>
           ))}
-        </select>
+        </Select>
       </label>
       <label className="checkbox-label">
         <input type="checkbox" name="related_party" />
-        Related-party vendor
+        Related-party supplier
       </label>
       <div className="inline-note">
-        Due diligence is required before live use. Bank details are
-        intentionally gated in this build.
+        Save a supplier once, then select their name in Expenses. This directory
+        records suppliers; it does not send payments.
       </div>
       <button className="button primary" disabled={busy}>
-        {busy ? "Saving…" : "Create vendor"}
+        {busy ? "Saving…" : "Create supplier"}
         <Plus size={16} />
       </button>
     </form>
@@ -2141,21 +2779,25 @@ function Reports({
         .filter((r) => r.type === "equity")
         .reduce((n, r) => n + r.balance, 0) - net;
   return (
-    <section className="panel">
+    <section className="panel finance-workspace financial-statements">
       <div className="panel-heading">
         <div>
           <h2>{report}</h2>
-          <p>All posted entries · local October 2026 dataset · {currency}</p>
+          <p>All posted entries · {currency}</p>
         </div>
         <a className="button secondary small" href={exportUrl}>
           <Download size={15} />
           Trial balance CSV
         </a>
       </div>
-      <div className="report-tabs">
+      <div
+        className="report-tabs finance-tabs"
+        aria-label="Financial statements"
+      >
         {["Trial balance", "Profit & loss", "Balance sheet"].map((r) => (
           <button
             key={r}
+            aria-pressed={report === r}
             className={report === r ? "selected" : ""}
             onClick={() => setReport(r)}
           >
@@ -2256,8 +2898,8 @@ function Reports({
       )}
       <div className="report-note">
         <ShieldCheck size={16} />
-        Management test reports. Accounting policies and statutory presentation
-        await accountant and CPA approval.
+        Management reports. Accounting policies and statutory presentation await
+        accountant and CPA approval.
       </div>
     </section>
   );
@@ -2288,12 +2930,12 @@ function BankImport({
     load();
   }, [load]);
   return (
-    <section className="panel bank-import">
+    <section className="panel bank-import finance-workspace">
       <div className="panel-heading">
         <div>
           <h2>Statement reconciliation</h2>
           <p>
-            Import a synthetic debit statement. Match each row once, for the
+            Import a debit or credit statement. Match each row once, for the
             exact amount and currency.
           </p>
         </div>
@@ -2309,17 +2951,22 @@ function BankImport({
       <div className="bank-content">
         <p>
           Columns: reference, date, currency, amount_minor, description. Amounts
-          are positive debit amounts in integer minor units ({currency}).
-          Credits and bank balance validation are outside this local slice.
+          are positive integer minor units ({currency}). Add an optional
+          direction column: debit or credit (defaults to debit). Bank balance
+          validation is not included.
         </p>
         {["finance", "reconciler"].includes(role) && (
           <div className="bank-upload">
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              aria-label="Synthetic bank statement CSV"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-            />
+            <label className="bank-file-label">
+              <span>Upload statement CSV</span>
+              <small>Debit and credit transactions · maximum 1 MB</small>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                aria-label="Bank statement CSV"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+              />
+            </label>
             <button
               className="button secondary small"
               disabled={!file || busy}
@@ -2349,7 +2996,7 @@ function BankImport({
               }}
             >
               <Upload size={14} />
-              {busy ? "Importing…" : "Import test statement"}
+              {busy ? "Importing…" : "Import statement"}
             </button>
           </div>
         )}
@@ -2370,7 +3017,7 @@ function BankImport({
                 <tr>
                   <th>Reference</th>
                   <th>Date</th>
-                  <th className="number">Debit</th>
+                  <th className="number">Amount / direction</th>
                   <th>Match</th>
                 </tr>
               </thead>
@@ -2379,8 +3026,18 @@ function BankImport({
                   <tr key={r.id}>
                     <td>{r.reference}</td>
                     <td>{r.date}</td>
-                    <td className="number">{fmt(r.amount_minor, currency)}</td>
-                    <td>{r.matched_spend_id || "Unmatched"}</td>
+                    <td className="number">
+                      {fmt(r.amount_minor, currency)} · {r.direction}
+                    </td>
+                    <td>
+                      {r.matched_spend_id ||
+                        r.matched_repayment_id ||
+                        r.matched_refund_id ||
+                        r.matched_record_payment_id ||
+                        r.matched_record_refund_id ||
+                        r.matched_recovery_id ||
+                        "Unmatched"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
