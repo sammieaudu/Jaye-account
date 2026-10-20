@@ -834,11 +834,6 @@ export default function Home() {
                 Correct record or Correct payment. Use Record refund only when
                 money was actually returned to Jaye.
               </p>
-              <p>
-                <strong>For your demo:</strong> start with Expenses →
-                Subscriptions → Employees → Payroll → Reports. These screens
-                document money already spent or owed; they do not send payments.
-              </p>
             </section>
           )}
           {registerDetail && (
