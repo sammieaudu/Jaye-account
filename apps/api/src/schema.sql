@@ -120,3 +120,18 @@ CREATE TABLE IF NOT EXISTS sales_invoices (
  document TEXT NOT NULL, total_minor INTEGER NOT NULL, created_at TEXT NOT NULL,
  updated_at TEXT NOT NULL, UNIQUE(entity_id,number)
 );
+
+CREATE TABLE IF NOT EXISTS sales_invoice_payments (
+ id TEXT PRIMARY KEY,
+ invoice_id TEXT NOT NULL REFERENCES sales_invoices(id),
+ request_key TEXT NOT NULL UNIQUE,
+ amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+ date TEXT NOT NULL,
+ reference TEXT NOT NULL,
+ method TEXT NOT NULL,
+ notes TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL,
+ voided_at TEXT,
+ void_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS invoice_payment_lookup ON sales_invoice_payments(invoice_id);

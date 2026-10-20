@@ -130,6 +130,26 @@ class Api {
   ) {
     return new InvoiceService(this.store).action(this.actor(req), id, input);
   }
+  @Post("sales-invoices/:id/payments") invoicePayment(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new InvoiceService(this.store).payment(this.actor(req), id, input);
+  }
+  @Post("sales-invoices/:id/payments/:paymentId/void") voidInvoicePayment(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Param("paymentId") paymentId: string,
+    @Body() input: any,
+  ) {
+    return new InvoiceService(this.store).voidPayment(
+      this.actor(req),
+      id,
+      paymentId,
+      input,
+    );
+  }
   @Get("categories") categories(
     @Req() req: Request,
     @Query("entity") entity: string,

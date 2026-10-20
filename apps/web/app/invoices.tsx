@@ -31,7 +31,19 @@ export default function Invoices({
     [draft, setDraft] = useState<Row | null>(null),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [payment, setPayment] = useState<Row | null>(null),
+    [voiding, setVoiding] = useState<Row | null>(null);
+  const summary = rows
+    .filter((r) => r.document.status === "issued")
+    .reduce((all: Row, r) => {
+      const c = r.document.currency;
+      all[c] ||= { total: 0, received: 0, owed: 0 };
+      all[c].total += r.total_minor;
+      all[c].received += r.received_minor;
+      all[c].owed += r.balance_minor;
+      return all;
+    }, {});
   const load = () => request(`/sales-invoices?entity=${entity}`).then(setRows);
   useEffect(() => {
     let active = true;
@@ -132,6 +144,58 @@ export default function Invoices({
       setBusy(false);
     }
   }
+  async function savePayment(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selected || !payment || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const r = await request(`/sales-invoices/${selected.id}/payments`, {
+        method: "POST",
+        body: JSON.stringify({
+          ...payment,
+          amount_minor: toMinor(payment.amount),
+          revision: selected.revision,
+        }),
+      });
+      setSelected(r);
+      setPayment(null);
+      setNotice("Payment saved. The amount still owed has been updated.");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function voidPayment(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selected || !voiding || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const r = await request(
+        `/sales-invoices/${selected.id}/payments/${voiding.id}/void`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            reason: voiding.reason,
+            revision: selected.revision,
+          }),
+        },
+      );
+      setSelected(r);
+      setVoiding(null);
+      setNotice(
+        "Incorrect payment voided. The balance is updated and history retained.",
+      );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function pdf(r: Row) {
     const { jsPDF } = await import("jspdf");
     const { default: autoTable } = await import("jspdf-autotable");
@@ -143,16 +207,31 @@ export default function Invoices({
     doc.setFontSize(27);
     doc.setFont("helvetica", "bold");
     try {
-      const svg = (await (await fetch("/brand/jaye.svg")).text()).replaceAll("#0F2A24", "#FFFFFF");
+      const svg = (await (await fetch("/brand/jaye.svg")).text()).replaceAll(
+        "#0F2A24",
+        "#FFFFFF",
+      );
       const image = new Image();
-      const url = URL.createObjectURL(new Blob([svg], {type:"image/svg+xml"}));
+      const url = URL.createObjectURL(
+        new Blob([svg], { type: "image/svg+xml" }),
+      );
       try {
-        await new Promise<void>((resolve,reject)=>{image.onload=()=>resolve();image.onerror=reject;image.src=url;});
-        const canvas=document.createElement("canvas");canvas.width=552;canvas.height=160;
-        canvas.getContext("2d")!.drawImage(image,0,0,552,160);
-        doc.addImage(canvas.toDataURL("image/png"),"PNG",16,15,38,11);
-      } finally {URL.revokeObjectURL(url);}
-    } catch {doc.text("JAYE",16,24);}
+        await new Promise<void>((resolve, reject) => {
+          image.onload = () => resolve();
+          image.onerror = reject;
+          image.src = url;
+        });
+        const canvas = document.createElement("canvas");
+        canvas.width = 552;
+        canvas.height = 160;
+        canvas.getContext("2d")!.drawImage(image, 0, 0, 552, 160);
+        doc.addImage(canvas.toDataURL("image/png"), "PNG", 16, 15, 38, 11);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    } catch {
+      doc.text("JAYE", 16, 24);
+    }
 
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
@@ -258,7 +337,25 @@ export default function Invoices({
       y,
       { align: "right" },
     );
-    y += 14;
+    y += 9;
+    if (d.status === "issued") {
+      space(23);
+      doc.setFont("helvetica", "normal");
+      doc.text(
+        `RECEIVED: ${d.currency} ${(r.received_minor / 100).toFixed(2)}`,
+        194,
+        y,
+        { align: "right" },
+      );
+      y += 7;
+      doc.text(
+        `BALANCE DUE: ${d.currency} ${(r.balance_minor / 100).toFixed(2)}`,
+        194,
+        y,
+        { align: "right" },
+      );
+      y += 10;
+    }
     for (const [label, value] of [
       ["Payment details", d.payment_details],
       ["Notes", d.notes],
@@ -514,7 +611,14 @@ export default function Invoices({
       ) : selected ? (
         <>
           <div className="quick-guide-heading">
-            <button className="button" onClick={() => setSelected(null)}>
+            <button
+              className="button"
+              onClick={() => {
+                setSelected(null);
+                setPayment(null);
+                setVoiding(null);
+              }}
+            >
               ← Back to invoices
             </button>
             <div className="button-row">
@@ -548,16 +652,233 @@ export default function Invoices({
               </button>
             </div>
           </div>
+          {selected.document.status === "issued" && (
+            <section className="invoice-editor">
+              <div className="quick-guide-heading">
+                <div>
+                  <h3>Customer payments · {selected.payment_status}</h3>
+                  <p>
+                    Received{" "}
+                    <strong>
+                      {money(
+                        selected.received_minor,
+                        selected.document.currency,
+                      )}
+                    </strong>{" "}
+                    · Still owed{" "}
+                    <strong>
+                      {money(
+                        selected.balance_minor,
+                        selected.document.currency,
+                      )}
+                    </strong>
+                  </p>
+                </div>
+                {!payment && selected.balance_minor > 0 && (
+                  <button
+                    className="button primary"
+                    disabled={busy}
+                    onClick={() => {
+                      setVoiding(null);
+                      setPayment({
+                        request_key: crypto.randomUUID(),
+                        amount: (selected.balance_minor / 100).toFixed(2),
+                        date: today(),
+                        reference: "",
+                        method: "Bank transfer",
+                        notes: "",
+                      });
+                    }}
+                  >
+                    Record payment received
+                  </button>
+                )}
+              </div>
+              <p>
+                Record money already received. Each payment reduces this
+                invoice’s balance once. Customer receipts are tracked here
+                separately from expense reports and the general ledger.
+              </p>
+              {payment && (
+                <form onSubmit={savePayment}>
+                  <div className="form-row">
+                    <label>
+                      Amount received ({selected.document.currency}){" "}
+                      <span className="required-asterisk">*</span>
+                      <input
+                        required
+                        inputMode="decimal"
+                        value={payment.amount}
+                        onChange={(e) =>
+                          setPayment({ ...payment, amount: e.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Payment date <span className="required-asterisk">*</span>
+                      <input
+                        required
+                        type="date"
+                        min={selected.document.date}
+                        value={payment.date}
+                        onChange={(e) =>
+                          setPayment({ ...payment, date: e.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Payment reference{" "}
+                      <span className="required-asterisk">*</span>
+                      <input
+                        required
+                        maxLength={180}
+                        value={payment.reference}
+                        onChange={(e) =>
+                          setPayment({ ...payment, reference: e.target.value })
+                        }
+                      />
+                      <small>
+                        Use the bank reference or a unique receipt number.
+                      </small>
+                    </label>
+                    <label>
+                      Payment method
+                      <Select
+                        value={payment.method}
+                        onChange={(e) =>
+                          setPayment({ ...payment, method: e.target.value })
+                        }
+                      >
+                        {["Bank transfer", "Card", "Cash", "Other"].map((m) => (
+                          <option key={m}>{m}</option>
+                        ))}
+                      </Select>
+                    </label>
+                  </div>
+                  <label>
+                    Notes (optional)
+                    <textarea
+                      maxLength={1000}
+                      value={payment.notes}
+                      onChange={(e) =>
+                        setPayment({ ...payment, notes: e.target.value })
+                      }
+                    />
+                  </label>
+                  <div className="button-row">
+                    <button className="button primary" disabled={busy}>
+                      {busy ? "Saving…" : "Save payment"}
+                    </button>
+                    <button
+                      type="button"
+                      className="button"
+                      disabled={busy}
+                      onClick={() => setPayment(null)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+              {voiding && (
+                <form onSubmit={voidPayment}>
+                  <h3>Void incorrect payment</h3>
+                  <p>
+                    This removes an entry made by mistake from the received
+                    total. It does not record a customer refund.
+                  </p>
+                  <label>
+                    Reason <span className="required-asterisk">*</span>
+                    <input
+                      required
+                      maxLength={180}
+                      value={voiding.reason}
+                      onChange={(e) =>
+                        setVoiding({ ...voiding, reason: e.target.value })
+                      }
+                    />
+                  </label>
+                  <div className="button-row">
+                    <button className="button primary" disabled={busy}>
+                      Void payment
+                    </button>
+                    <button
+                      type="button"
+                      className="button"
+                      disabled={busy}
+                      onClick={() => setVoiding(null)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+            </section>
+          )}
+          {(selected.payments || []).length > 0 && (
+            <section className="invoice-editor">
+              <h3>Payment history</h3>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Reference</th>
+                      <th>Method</th>
+                      <th>Amount</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selected.payments.map((p: Row) => (
+                      <tr key={p.id}>
+                        <td>{p.date}</td>
+                        <td>
+                          {p.reference}
+                          {p.notes && <small>{p.notes}</small>}
+                        </td>
+                        <td>{p.method}</td>
+                        <td>
+                          {money(p.amount_minor, selected.document.currency)}
+                        </td>
+                        <td>
+                          {p.voided_at
+                            ? `Voided: ${p.void_reason}`
+                            : "Recorded"}
+                        </td>
+                        <td>
+                          {!p.voided_at && (
+                            <button
+                              className="button"
+                              disabled={busy}
+                              onClick={() => {
+                                setPayment(null);
+                                setVoiding({ ...p, reason: "" });
+                              }}
+                            >
+                              Void incorrect payment
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
           <InvoicePreview record={selected} />
           {selected.document.status !== "cancelled" && (
             <details>
               <summary>More actions</summary>
               <p>
                 Cancelling keeps this invoice and its number in your records.
+                Invoices with recorded payments cannot be cancelled.
               </p>
               <button
                 className="button"
-                disabled={busy}
+                disabled={busy || selected.received_minor > 0}
                 onClick={() => action("cancel")}
               >
                 Cancel invoice
@@ -580,9 +901,19 @@ export default function Invoices({
             </button>
           </div>
           <p>
-            Invoices here are customer documents. They do not change expense
-            reports or record money received.
+            Issue an invoice, then record payments as they arrive. Drafts and
+            cancelled invoices are excluded from customer balances.
           </p>
+          {Object.entries(summary).map(([currency, v]) => (
+            <div className="invoice-editor" key={currency}>
+              <strong>{currency} customer balances</strong>
+              <p>
+                Invoiced {money((v as Row).total, currency)} · Received{" "}
+                {money((v as Row).received, currency)} · Still owed{" "}
+                {money((v as Row).owed, currency)}
+              </p>
+            </div>
+          ))}
           {rows.length ? (
             <div className="table-scroll">
               <table>
@@ -592,6 +923,8 @@ export default function Invoices({
                     <th>Customer</th>
                     <th>Due date</th>
                     <th>Total</th>
+                    <th>Received</th>
+                    <th>Still owed</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -609,7 +942,9 @@ export default function Invoices({
                       <td>{r.document.customer}</td>
                       <td>{r.document.due_date}</td>
                       <td>{money(r.total_minor, r.document.currency)}</td>
-                      <td>{r.document.status}</td>
+                      <td>{money(r.received_minor, r.document.currency)}</td>
+                      <td>{money(r.balance_minor, r.document.currency)}</td>
+                      <td>{r.payment_status}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -635,7 +970,7 @@ function InvoicePreview({ record: r }: { record: Row }) {
         <div>
           <h2>INVOICE</h2>
           <p>{r.number}</p>
-          <span>{d.status.toUpperCase()}</span>
+          <span>{(r.payment_status || d.status).toUpperCase()}</span>
         </div>
       </header>
       <div className="invoice-parties">
@@ -652,7 +987,7 @@ function InvoicePreview({ record: r }: { record: Row }) {
         </div>
       </div>
       <div className="invoice-dates">
-        <span>Issued: {d.date}</span>
+        <span>Invoice date: {d.date}</span>
         <span>Due: {d.due_date}</span>
         <span>Currency: {d.currency}</span>
       </div>
@@ -689,6 +1024,16 @@ function InvoicePreview({ record: r }: { record: Row }) {
         <h3>
           Total <strong>{money(r.total_minor, d.currency)}</strong>
         </h3>
+        {d.status === "issued" && (
+          <>
+            <p>
+              Received <strong>{money(r.received_minor, d.currency)}</strong>
+            </p>
+            <h3>
+              Balance due <strong>{money(r.balance_minor, d.currency)}</strong>
+            </h3>
+          </>
+        )}
       </div>
       {d.payment_details && (
         <section>
