@@ -44,7 +44,6 @@ export default function Invoices({
       all[c].owed += r.balance_minor;
       return all;
     }, {});
-  const load = () => request(`/sales-invoices?entity=${entity}`).then(setRows);
   useEffect(() => {
     let active = true;
     request(`/sales-invoices?entity=${entity}`)
@@ -119,7 +118,7 @@ export default function Invoices({
       );
       setSelected(r);
       setDraft(null);
-      await load();
+      setRows((previous) => [r, ...previous.filter((row) => row.id !== r.id)]);
       setNotice("Invoice saved. Review it, then issue and export it.");
     } catch (e) {
       setError((e as Error).message);
@@ -137,7 +136,7 @@ export default function Invoices({
         body: JSON.stringify({ action, revision: selected.revision }),
       });
       setSelected(r);
-      await load();
+      setRows((previous) => [r, ...previous.filter((row) => row.id !== r.id)]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -161,7 +160,7 @@ export default function Invoices({
       setSelected(r);
       setPayment(null);
       setNotice("Payment saved. The amount still owed has been updated.");
-      await load();
+      setRows((previous) => [r, ...previous.filter((row) => row.id !== r.id)]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -189,7 +188,7 @@ export default function Invoices({
       setNotice(
         "Incorrect payment voided. The balance is updated and history retained.",
       );
-      await load();
+      setRows((previous) => [r, ...previous.filter((row) => row.id !== r.id)]);
     } catch (e) {
       setError((e as Error).message);
     } finally {

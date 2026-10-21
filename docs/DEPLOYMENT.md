@@ -66,3 +66,9 @@ Verified in the signed-in Chrome session on the production alias:
 - Saved JAYE-00001 for a clearly labelled QA customer, two items at NGN 1,500 each, total NGN 3,000. Reopened after reload and exported a one-page PDF with the expected customer and total.
 - Voided the test expense and cancelled the test invoice. Dashboard and expense totals returned to NGN 0; customer invoices did not add expense costs. Existing records were not altered. Office supplies remains as a reusable category, and test audit history is retained.
 - TypeScript and Vercel production build passed. Browser export and save/persistence checks passed; device-specific native sharing was not exercised.
+
+### Customer invoice payments
+
+Invoice payments support partial receipts, currency-separated customer balances, received/balance figures on PDFs, payment history and voiding mistaken entries. Only issued invoices accept payments. Server transactions, request-key retries, revision checks, repeated-reference rejection and overpayment validation protect balances. Paid invoices cannot be cancelled until erroneous payments are voided. Customer receipts remain an invoice subregister; they do not yet post to the general ledger or match bank statements.
+
+113 tests and production build passed. Railway deployment `adba7ff5-8b8d-4d59-b1bc-72e1fe27a969` succeeded. Vercel follow-up `dpl_2bz1oUfXj7GysaAZZmY5rn4ZzopN` is Ready and aliased to the live site; it avoids reporting a successful payment as failed when a subsequent list refresh has a network error. Live browser verification recorded 400 then 600 against a 1,000 test invoice, verified part-paid then paid and persistence after reload. Both test payments were voided and JAYE-00002 cancelled, leaving zero customer balances. No real receipts were changed.
