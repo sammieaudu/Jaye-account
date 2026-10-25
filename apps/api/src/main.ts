@@ -25,9 +25,12 @@ import {
   ExceptionFilter,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import type { Request, Response } from "express";
 import { FinanceStore, DomainError, csv } from "./domain";
 import { resolve } from "node:path";
+import { FinancialService } from "./financial/service";
+import { exportFinancialWorkbook } from "./financial/workbook";
 
 const STORE = "STORE";
 function token(req: Request) {
@@ -63,6 +66,171 @@ class Errors implements ExceptionFilter {
 @Controller("api")
 class Api {
   constructor(@Inject(STORE) private readonly store: FinanceStore) {}
+  financialActor(req: Request) {
+    if (!hostedMode()) return this.actor(req);
+    if (!validServiceKey(req.headers["x-jaye-service-key"]))
+      throw new DomainError("Authenticated gateway required", 401);
+    const identity = req.headers["x-jaye-user-id"];
+    if (
+      typeof identity !== "string" ||
+      !/^user_[a-zA-Z0-9]{1,120}$/.test(identity)
+    )
+      throw new DomainError("Verified personal identity required", 401);
+    const editors = (process.env.JAYE_FINANCIAL_EDITORS || "")
+      .split(",")
+      .filter(Boolean);
+    const role =
+      editors.length && !editors.includes(identity) ? "auditor" : "finance";
+    const id = `hosted:${identity}`;
+    this.store.run(
+      "INSERT INTO users(id,name,role,entities) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET role=excluded.role",
+      id,
+      "Workspace member",
+      role,
+      JSON.stringify(["ng"]),
+    );
+    return this.store.actor(id);
+  }
+  @Get("financial/contract") financialContract(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+  ) {
+    return new FinancialService(this.store).contract(
+      this.financialActor(req),
+      entity,
+    );
+  }
+  @Get("financial/workspace") financialWorkspace(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Query("scenario") scenario: string,
+  ) {
+    return new FinancialService(this.store).workspace(
+      this.financialActor(req),
+      entity,
+      scenario || "base",
+    );
+  }
+  @Post("financial/resources") financialSave(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Body() input: any,
+  ) {
+    return new FinancialService(this.store).save(
+      this.financialActor(req),
+      entity,
+      input,
+    );
+  }
+  @Post("financial/resources/:id/action") financialAction(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new FinancialService(this.store).action(
+      this.financialActor(req),
+      entity,
+      id,
+      input,
+    );
+  }
+  @Get("financial/history/:id") financialHistory(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Param("id") id: string,
+  ) {
+    return new FinancialService(this.store).history(
+      this.financialActor(req),
+      entity,
+      id,
+    );
+  }
+  @Get("financial/imports/:id") financialImportRead(@Req() req:Request,@Query("entity") entity:string,@Param("id") id:string){return new FinancialService(this.store).readImport(this.financialActor(req),entity,id);}
+  @Post("financial/imports/:id/replace") financialImportReplace(@Req() req:Request,@Query("entity") entity:string,@Param("id") id:string,@Body() input:any){return new FinancialService(this.store).replaceDraft(this.financialActor(req),entity,id,input);}
+  @Post("financial/imports/preview") financialPreview(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Body() input: any,
+  ) {
+    return new FinancialService(this.store).preview(
+      this.financialActor(req),
+      entity,
+      input,
+    );
+  }
+  @Post("financial/imports/:id/accept") financialAccept(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new FinancialService(this.store).accept(
+      this.financialActor(req),
+      entity,
+      id,
+      input,
+    );
+  }
+  @Post("financial/imports/:id/discard") financialDiscard(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Param("id") id: string,
+  ) {
+    return new FinancialService(this.store).discard(
+      this.financialActor(req),
+      entity,
+      id,
+    );
+  }
+  @Post("financial/snapshots") financialSnapshot(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Body() input: any,
+  ) {
+    return new FinancialService(this.store).snapshot(
+      this.financialActor(req),
+      entity,
+      input,
+    );
+  }
+  @Get("financial/snapshots/:id") financialSnapshotRead(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Param("id") id: string,
+  ) {
+    return new FinancialService(this.store).snapshotData(
+      this.financialActor(req),
+      entity,
+      id,
+    );
+  }
+  @Get("financial/snapshots/:id/excel") async financialExcel(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Param("id") id: string,
+    @Res() res: Response,
+  ) {
+    const snap = new FinancialService(this.store).snapshotData(
+      this.financialActor(req),
+      entity,
+      id,
+    );
+    const bytes = await exportFinancialWorkbook(
+      snap.input,
+      id,
+      snap.scenario_id,
+    );
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="jaye-90-day-${id}.xlsx"`,
+    );
+    res.send(Buffer.from(bytes));
+  }
   actor(req: Request) {
     if (hostedMode()) {
       if (!validServiceKey(req.headers["x-jaye-service-key"]))
@@ -661,7 +829,7 @@ class Api {
 class AppModule {}
 export async function createFinanceApp(store?: FinanceStore) {
   validateHosting();
-  const app = await NestFactory.create(
+  const app = await NestFactory.create<NestExpressApplication>(
     {
       module: AppModule,
       providers: [
@@ -680,6 +848,7 @@ export async function createFinanceApp(store?: FinanceStore) {
     },
     { logger: process.env.JAYE_TEST ? false : ["warn", "error", "log"] },
   );
+  app.useBodyParser("json", { limit: "6mb" });
   app.useGlobalFilters(new Errors());
   app.use((req: Request, res: Response, next: () => void) => {
     res.set({

@@ -72,3 +72,12 @@ Verified in the signed-in Chrome session on the production alias:
 Invoice payments support partial receipts, currency-separated customer balances, received/balance figures on PDFs, payment history and voiding mistaken entries. Only issued invoices accept payments. Server transactions, request-key retries, revision checks, repeated-reference rejection and overpayment validation protect balances. Paid invoices cannot be cancelled until erroneous payments are voided. Customer receipts remain an invoice subregister; they do not yet post to the general ledger or match bank statements.
 
 113 tests and production build passed. Railway deployment `adba7ff5-8b8d-4d59-b1bc-72e1fe27a969` succeeded. Vercel follow-up `dpl_2bz1oUfXj7GysaAZZmY5rn4ZzopN` is Ready and aliased to the live site; it avoids reporting a successful payment as failed when a subsequent list refresh has a network error. Live browser verification recorded 400 then 600 against a 1,000 test invoice, verified part-paid then paid and persistence after reload. Both test payments were voided and JAYE-00002 cancelled, leaving zero customer balances. No real receipts were changed.
+
+
+### Financial Model release — 25 October 2026
+
+The user authorized merging `Jaye-financial-model` into `main` and deployment. Release checks pass: 137 tests, API/web type checks and production build. The release adds the Financial Model workspace, additive SQLite tables, individual hosted financial attribution, CSV/API imports and formula-based Excel exports.
+
+Deploy Railway first using the existing service and `/data` volume, verify health and the authenticated `/api/financial/contract?entity=ng` endpoint, then deploy the existing Vercel project (`jaye-finance`, team `manoahumukoros-projects`). Preserve all existing secrets, data and Clerk configuration. Do not create a replacement project.
+
+Deployment is currently pending account access: the available Vercel CLI/browser account cannot access that team/project, and Railway is signed out. No production deployment has been triggered for this release. After access is restored, deploy both services and verify authenticated workspace access and anonymous denial. Financial business assumptions remain provisional; see `docs/cfo/CFO_HANDOFF.md`.

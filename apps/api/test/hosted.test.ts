@@ -63,6 +63,16 @@ test("hosted backend denies anonymous and local identity access, and preserves d
     401,
   );
   const headers = { "x-jaye-service-key": process.env.JAYE_API_SECRET };
+  assert.equal(
+    (await call("financial/workspace?entity=ng", headers)).status,
+    401,
+  );
+  const personalHeaders = { ...headers, "x-jaye-user-id": "user_financeqa" };
+  assert.equal(
+    (await call("financial/workspace?entity=ng", personalHeaders)).status,
+    200,
+  );
+  assert.equal(store.actor("hosted:user_financeqa").role, "finance");
   assert.equal((await call("demo/users", headers)).status, 403);
   assert.equal(
     (

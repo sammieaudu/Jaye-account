@@ -15,7 +15,8 @@ async function proxy(
     return Response.json({ message: "Invalid path" }, { status: 400 });
   const headers = new Headers();
   if (hosted) {
-    if (!canAccessWorkspace(await currentUser()))
+    const verifiedUser = await currentUser();
+    if (!canAccessWorkspace(verifiedUser))
       return Response.json(
         { message: "Sign in to access the workspace." },
         { status: 401 },
@@ -40,6 +41,7 @@ async function proxy(
         { status: 503 },
       );
     headers.set("x-jaye-service-key", process.env.JAYE_API_SECRET);
+    headers.set("x-jaye-user-id", verifiedUser!.id);
   } else {
     for (const name of ["cookie", "origin"]) {
       const value = request.headers.get(name);

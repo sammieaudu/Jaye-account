@@ -7,6 +7,7 @@ import Recoveries from "./recoveries";
 import Reimbursements from "./reimbursements";
 import Subscriptions from "./subscriptions";
 import Reporting from "./reporting";
+import FinancialModel from "./financial-model";
 import { AuditTrail, SettingsControls, InvestorWorkspace } from "./governance";
 import FinanceStatus from "./finance-status";
 import RegisterDetails from "./register-details";
@@ -82,6 +83,7 @@ const menuGroups = [
     title: "Planning & reports",
     items: [
       { label: "Budgets", icon: PieChart },
+      { label: "Financial Model", icon: Activity },
       { label: "Reports", icon: FileText },
     ],
   },
@@ -633,7 +635,7 @@ export default function Home() {
       ? ["manager", "finance", "cfo", "auditor", "payer", "reconciler"]
       : page === "Budgets"
         ? ["manager", "finance", "cfo", "auditor"]
-        : ["General ledger", "Reports"].includes(page)
+        : ["General ledger", "Reports", "Financial Model"].includes(page)
           ? ["finance", "cfo", "auditor", "reconciler"]
           : page === "Audit trail"
             ? ["finance", "cfo", "auditor"]
@@ -1238,6 +1240,13 @@ export default function Home() {
             ) : (
               !error && (
                 <>
+                  {page === "Financial Model" && user && (
+                    <FinancialModel
+                      key={`${entity}:${user.id}`}
+                      entity={entity}
+                      request={api}
+                    />
+                  )}
                   {page === "Recoveries" && user && (
                     <Recoveries
                       key={`${entity}:${user.id}`}

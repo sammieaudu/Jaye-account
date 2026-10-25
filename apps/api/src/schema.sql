@@ -135,3 +135,13 @@ CREATE TABLE IF NOT EXISTS sales_invoice_payments (
  void_reason TEXT
 );
 CREATE INDEX IF NOT EXISTS invoice_payment_lookup ON sales_invoice_payments(invoice_id);
+-- Financial planning is isolated from posted books; additive migration only.
+CREATE TABLE IF NOT EXISTS fm_resources(id TEXT NOT NULL,entity_id TEXT NOT NULL REFERENCES entities(id),kind TEXT NOT NULL,data TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,archived INTEGER NOT NULL DEFAULT 0,updated_at TEXT NOT NULL,PRIMARY KEY(entity_id,id));
+CREATE TABLE IF NOT EXISTS fm_history(id INTEGER PRIMARY KEY AUTOINCREMENT,entity_id TEXT NOT NULL,resource_id TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,actor_id TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS fm_requests(entity_id TEXT NOT NULL,request_key TEXT NOT NULL,payload_hash TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(entity_id,request_key));
+CREATE TABLE IF NOT EXISTS fm_events(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL REFERENCES entities(id),source_id TEXT NOT NULL,external_id TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,imported_at TEXT NOT NULL,UNIQUE(entity_id,source_id,external_id));
+CREATE TABLE IF NOT EXISTS fm_event_history(id INTEGER PRIMARY KEY AUTOINCREMENT,entity_id TEXT NOT NULL,event_id TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,actor_id TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS fm_imports(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL,status TEXT NOT NULL,rows_json TEXT NOT NULL,errors_json TEXT NOT NULL,created_at TEXT NOT NULL,accepted_at TEXT,actor_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS fm_snapshots(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL,name TEXT NOT NULL,kind TEXT NOT NULL,scenario_id TEXT NOT NULL,input_json TEXT NOT NULL,result_json TEXT NOT NULL,created_at TEXT NOT NULL,actor_id TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS fm_snapshot_immutable BEFORE UPDATE ON fm_snapshots BEGIN SELECT RAISE(ABORT,'Snapshots are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS fm_event_history_immutable BEFORE UPDATE ON fm_event_history BEGIN SELECT RAISE(ABORT,'Event history is immutable'); END;
