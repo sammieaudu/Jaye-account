@@ -1,5 +1,15 @@
 # Model changelog
 
+## 1.1.0 — custom periods and editable monthly budgets
+
+- Replaced the fixed 90-day calculation/export window with validated inclusive start/end dates (1–366 days); existing configurations keep their original 90-day default. Added a date selector and 90-day preset within the existing interface.
+- Made daily rows, monthly statements, closing balances, checkpoints and Excel formulas follow the selected period. Actual cutoff is capped at period end; recurring vendor schedules cover the selected window.
+- Added persistent monthly budget CRUD, archive/restore, immutable revision history, individual actor attribution, role checks, retry-safe writes and optimistic revision checks. Used budget lines cannot be deleted or reassigned; existing accounting records remain unchanged.
+- Preserved original budget rows and history through additive metadata tables. Monthly budgets remain separate from forecast cost schedules and frozen snapshots.
+- API/web type checks and production build pass; 144 tests pass. Local browser checks covered date controls, budget create/edit forms and 390px layout without saving synthetic records into the existing database.
+- Independent Excel recalculation passed all three scenarios and input edits for 3-day and 136-day fixtures. Monthly/period revenue, profit, cash flow and balance checks match the engine with zero formula errors. Rendered all sheets and inspected period-dependent statement previews.
+- Local follow-up only; no deployment or external provider activation.
+
 ## 1.0.0 — local implementation verified, business inputs provisional
 
 - Added financial configuration, revision history, retry-safe imports, source events and immutable snapshots through additive schema changes. Existing accounting tables are not rewritten.

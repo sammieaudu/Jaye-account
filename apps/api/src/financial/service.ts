@@ -372,16 +372,28 @@ export class FinancialService {
   input(entity: string): Input {
     const resources = this.resources(entity),
       config = resources.find((r) => r.kind === "config")!.data;
-    const subscriptions = new SubscriptionService(
+    const subscriptionService = new SubscriptionService(
       this.s,
       () => config.cutoff,
-    ).list(this.s.actor("finance"), entity, 365);
-    const vendorCosts = subscriptions.charges
+    );
+    const subscriptions = subscriptionService.list(
+      this.s.actor("finance"),
+      entity,
+      365,
+    );
+    const vendorCosts = subscriptions.subscriptions
+      .flatMap((sub) =>
+        subscriptionService.charges(
+          this.s.actor("finance"),
+          sub,
+          config.end_date ?? addDays(config.start_date, 89),
+        ),
+      )
       .filter(
         (c: any) =>
           !c.expense &&
           c.due_date > config.cutoff &&
-          c.due_date <= addDays(config.start_date, 89),
+          c.due_date <= (config.end_date ?? addDays(config.start_date, 89)),
       )
       .map((c: any) => {
         const sub = subscriptions.subscriptions.find(

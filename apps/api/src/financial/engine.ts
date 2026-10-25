@@ -120,8 +120,11 @@ export function calculate(
   const active = input.resources.filter((r) => !r.archived);
   const config = active.find((r) => r.kind === "config")!.data;
   const start = config.start_date,
-    end = addDays(start, 89),
-    cutoff = config.cutoff;
+    end = config.end_date ?? addDays(start, 89),
+    cutoff = config.cutoff < end ? config.cutoff : end;
+  const length = days(start, end) + 1;
+  if (length < 1 || length > 366)
+    throw new Error("Choose a date range of 1–366 days, inclusive");
   const resources = new Map(input.resources.map((r) => [r.id, r]));
   const flows: Flow[] = [];
   const warnings: string[] = [];
@@ -1140,7 +1143,10 @@ export function calculate(
         daily.find((d) => d.cash < config.minimum_cash_minor)?.date || null,
       balance_check: statements(balances).balance_check,
     },
-    checkpoints: [29, 59, 89].map((i) => ({ day: i + 1, ...daily[i] })),
+    checkpoints: [...new Set([30, 60, 90, daily.length])]
+      .filter((n) => n <= daily.length)
+      .sort((a, b) => a - b)
+      .map((n) => ({ day: n, ...daily[n - 1] })),
     closing: balances,
     pmf: pmf(events, cutoff, config.operating_data_complete_through),
     services: serviceResults,

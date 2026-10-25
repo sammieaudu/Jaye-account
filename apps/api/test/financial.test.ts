@@ -719,3 +719,90 @@ test("campaign attribution does not create a second expense or cash payment", ()
   );
   assert.ok(result.warnings.some((w) => w.includes("Campaign attribution")));
 });
+
+test("custom financial ranges are inclusive, preserve the legacy 90-day default and handle leap dates", () => {
+  const input = pure();
+  assert.equal(calculate(input).daily.length, 90);
+  const config = input.resources.find((r) => r.kind === "config")!.data;
+  Object.assign(config, {
+    start_date: "2028-02-28",
+    end_date: "2028-03-01",
+    cutoff: "2028-02-27",
+  });
+  let result = calculate(input);
+  assert.deepEqual(
+    result.daily.map((d) => d.date),
+    ["2028-02-28", "2028-02-29", "2028-03-01"],
+  );
+  assert.deepEqual(
+    result.checkpoints.map((c) => c.day),
+    [3],
+  );
+  assert.equal(result.monthly.length, 2);
+  config.end_date = config.start_date;
+  assert.equal(calculate(input).daily.length, 1);
+  config.end_date = "2029-02-27";
+  assert.equal(calculate(input).daily.length, 366);
+  config.end_date = "2029-02-28";
+  assert.throws(() => calculate(input), /1–366/);
+});
+test("custom date range saves reject reversed ranges and preserve frozen original budgets", (t) => {
+  const { f, a, save } = fixture(t),
+    before = f.workspace(a, "ng"),
+    config = before.resources.find((r) => r.kind === "config")!;
+  const snap = f.snapshot(a, "ng", {
+    name: "Original 90 days",
+    kind: "budget",
+    scenario_id: "base",
+    request_key: randomUUID(),
+  });
+  assert.throws(
+    () =>
+      save(
+        "config",
+        { ...config.data, end_date: "2026-11-01" },
+        config.id,
+        config.revision,
+      ),
+    /1–366/,
+  );
+  save(
+    "config",
+    { ...config.data, end_date: "2026-12-31" },
+    config.id,
+    config.revision,
+  );
+  const after = f.workspace(a, "ng");
+  assert.equal(after.result.daily.length, 31);
+  assert.ok(after.variance_note?.includes("different calendar"));
+  assert.equal(f.snapshotData(a, "ng", snap.id).result.daily.length, 90);
+});
+test("custom-range workbook rows, monthly totals and final balances cover the selected period", async () => {
+  for (const end of ["2026-12-01", "2026-12-15", "2027-04-15"]) {
+    const input = pure();
+    input.resources.find((r) => r.kind === "config")!.data.end_date = end;
+    const result = calculate(input),
+      last = result.daily.length + 1;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(
+      (await exportFinancialWorkbook(input, "custom-range", "base")) as any,
+    );
+    assert.equal(wb.getWorksheet("Daily Cash and PL")!.rowCount, last);
+    assert.equal(
+      wb.getWorksheet("Daily Cash and PL")!.getCell(`A${last}`).value,
+      end,
+    );
+    assert.equal(
+      wb.getWorksheet("Checks")!.getCell("B2").formula,
+      `'Daily Cash and PL'!R${last}`,
+    );
+    assert.equal(
+      wb.getWorksheet("P&L")!.getCell(2, result.monthly.length + 2).formula,
+      `SUM('Daily Cash and PL'!B2:B${last})`,
+    );
+    assert.equal(
+      wb.getWorksheet("Balance Sheet")!.columnCount,
+      result.checkpoints.length + 2,
+    );
+  }
+});

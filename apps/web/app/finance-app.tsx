@@ -8,6 +8,7 @@ import Reimbursements from "./reimbursements";
 import Subscriptions from "./subscriptions";
 import Reporting from "./reporting";
 import FinancialModel from "./financial-model";
+import Budgets from "./budgets";
 import { AuditTrail, SettingsControls, InvestorWorkspace } from "./governance";
 import FinanceStatus from "./finance-status";
 import RegisterDetails from "./register-details";
@@ -1696,123 +1697,12 @@ export default function Home() {
                         role={user?.role || ""}
                       />
                     )}
-                  {page === "Budgets" && Array.isArray(data) && (
-                    <div className="finance-workspace budgets-workspace">
-                      <div className="metrics three">
-                        <Metric
-                          label="Approved sample budget"
-                          value={fmt(
-                            data.reduce(
-                              (n: number, b: Row) => n + b.amount_minor,
-                              0,
-                            ),
-                            currency,
-                            true,
-                          )}
-                          icon={<PieChart size={19} />}
-                          note="October 2026 · entity currency"
-                        />
-                        <Metric
-                          label="Committed + actual"
-                          value={fmt(
-                            data.reduce(
-                              (n: number, b: Row) =>
-                                n + b.committed_minor + b.actual_minor,
-                              0,
-                            ),
-                            currency,
-                            true,
-                          )}
-                          icon={<Wallet size={19} />}
-                          note="Commitments exclude posted spend"
-                        />
-                        <Metric
-                          label="Available to spend"
-                          value={fmt(
-                            data.reduce(
-                              (n: number, b: Row) => n + b.remaining_minor,
-                              0,
-                            ),
-                            currency,
-                            true,
-                          )}
-                          icon={<CircleDollarSign size={19} />}
-                          note="Budget less committed and actual"
-                        />
-                      </div>
-                      <section className="panel budgets-panel">
-                        <div className="panel-heading">
-                          <div>
-                            <h2>Department budgets</h2>
-                            <p>
-                              Track department allocations, commitments and
-                              actual spend.
-                            </p>
-                          </div>
-                        </div>
-                        <div className="table-scroll">
-                          <table>
-                            <thead>
-                              <tr>
-                                <th>Budget line</th>
-                                <th className="number">Budget</th>
-                                <th className="number">Committed</th>
-                                <th className="number">Actual</th>
-                                <th className="number">Remaining</th>
-                                <th>Utilization</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {data.map((b: Row) => (
-                                <tr key={b.id}>
-                                  <td>
-                                    <button
-                                      className="record-link"
-                                      onClick={() =>
-                                        setRegisterDetail({
-                                          kind: "budget",
-                                          record: b,
-                                        })
-                                      }
-                                    >
-                                      {b.department}
-                                      <ArrowUpRight size={14} />
-                                    </button>
-                                    <small>{b.category}</small>
-                                  </td>
-                                  <td className="number">
-                                    {fmt(b.amount_minor, currency)}
-                                  </td>
-                                  <td className="number">
-                                    {fmt(b.committed_minor, currency)}
-                                  </td>
-                                  <td className="number">
-                                    {fmt(b.actual_minor, currency)}
-                                  </td>
-                                  <td className="number">
-                                    {fmt(b.remaining_minor, currency)}
-                                  </td>
-                                  <td>
-                                    <div className="budget-meter">
-                                      <span
-                                        style={{
-                                          width: `${b.amount_minor > 0 ? Math.max(0, Math.min(100, ((b.committed_minor + b.actual_minor) / b.amount_minor) * 100)) : 0}%`,
-                                        }}
-                                      />
-                                    </div>
-                                    <small>
-                                      {b.amount_minor > 0
-                                        ? `${Math.round(((b.committed_minor + b.actual_minor) / b.amount_minor) * 100)}% used`
-                                        : "No budget set"}
-                                    </small>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </section>
-                    </div>
+                  {page === "Budgets" && (
+                    <Budgets
+                      entity={entity}
+                      currency={currency}
+                      request={api}
+                    />
                   )}
                   {page === "Vendors" && (
                     <section className="panel finance-workspace vendors-workspace">

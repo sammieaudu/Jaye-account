@@ -336,7 +336,8 @@ export default function FinancialModel({
     [detail, setDetail] = useState<Row | null>(null),
     [search, setSearch] = useState(""),
     [sourceFilter, setSourceFilter] = useState(""),
-    [confirmAction, setConfirmAction] = useState<Row | null>(null);
+    [confirmAction, setConfirmAction] = useState<Row | null>(null),
+    [dateRange, setDateRange] = useState<Row | null>(null);
   const inflight = useRef(false),
     sequence = useRef(0),
     requestController = useRef<AbortController | null>(null),
@@ -430,7 +431,7 @@ export default function FinancialModel({
   if (entity !== "ng")
     return (
       <section className="panel">
-        <h2>Lagos pilot</h2>
+        <h2>Lagos financial model</h2>
         <p>Select GoJaye Nigeria Ltd to use the NGN financial model.</p>
       </section>
     );
@@ -792,9 +793,10 @@ export default function FinancialModel({
     <div className="financial-model">
       <div className="panel-heading">
         <div>
-          <h2>Lagos · first 90 days</h2>
+          <h2>Lagos · financial model</h2>
           <p>
-            {r.start} – {r.end} · Actual cutoff {r.cutoff} · NGN
+            {r.start} – {r.end} · {r.daily.length} days · Actual cutoff{" "}
+            {r.cutoff} · NGN
           </p>
         </div>
         <div className="action-buttons">
@@ -819,12 +821,108 @@ export default function FinancialModel({
             Refresh
           </button>
           {canWrite && (
-            <button onClick={() => edit("config", config)}>
-              Pilot settings
-            </button>
+            <>
+              <button
+                onClick={() => {
+                  setDateRange({ ...config, data: { ...config.data } });
+                  setEditor(null);
+                }}
+              >
+                Date range
+              </button>
+              <button onClick={() => edit("config", config)}>
+                Model settings
+              </button>
+            </>
           )}
         </div>
       </div>
+      {dateRange && (
+        <section className="panel fm-panel">
+          <h3>Custom date range</h3>
+          <p>
+            Select 1–366 calendar days, inclusive. Statements and exports follow
+            this period. Dated funding, prices and cost plans keep their
+            original dates; saved snapshots remain unchanged.
+          </p>
+          <form
+            className="form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              safe(async () => {
+                await mutate("resources", {
+                  id: dateRange.id,
+                  kind: "config",
+                  revision: dateRange.revision,
+                  data: dateRange.data,
+                });
+                setDateRange(null);
+              });
+            }}
+          >
+            <div className="fm-grid">
+              <label>
+                Start date
+                <input
+                  type="date"
+                  required
+                  value={dateRange.data.start_date}
+                  onChange={(e) =>
+                    setDateRange({
+                      ...dateRange,
+                      data: { ...dateRange.data, start_date: e.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label>
+                End date
+                <input
+                  type="date"
+                  required
+                  min={dateRange.data.start_date}
+                  value={dateRange.data.end_date}
+                  onChange={(e) =>
+                    setDateRange({
+                      ...dateRange,
+                      data: { ...dateRange.data, end_date: e.target.value },
+                    })
+                  }
+                />
+              </label>
+            </div>
+            <div className="action-buttons">
+              <button className="button primary" disabled={busy}>
+                Apply date range
+              </button>
+              <button
+                type="button"
+                disabled={!dateRange.data.start_date || busy}
+                onClick={() => {
+                  const d = new Date(dateRange.data.start_date + "T00:00:00Z");
+                  d.setUTCDate(d.getUTCDate() + 89);
+                  setDateRange({
+                    ...dateRange,
+                    data: {
+                      ...dateRange.data,
+                      end_date: d.toISOString().slice(0, 10),
+                    },
+                  });
+                }}
+              >
+                90 days from start
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setDateRange(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
       <p className="micro">
         Updated {new Date(r.calculated_at).toLocaleTimeString()} · Refreshes
         every 30 seconds while visible. External data updates only after a
@@ -961,7 +1059,7 @@ export default function FinancialModel({
             ))}
           </div>
           <section className="panel fm-panel">
-            <h2>Operating cash through the pilot</h2>
+            <h2>Operating cash through the selected period</h2>
             <p>
               {r.summary.first_shortfall
                 ? `First shortfall: ${r.summary.first_shortfall}`
@@ -1077,7 +1175,7 @@ export default function FinancialModel({
               headers={[
                 "Metric",
                 ...r.monthly.map((x: Row) => x.period),
-                "90-day total",
+                "Period total",
               ]}
               rows={[
                 "revenue",
@@ -1151,7 +1249,7 @@ export default function FinancialModel({
           <section className="panel fm-panel">
             <h2>Cash flow</h2>
             <DataTable
-              headers={["Category", "90-day total"]}
+              headers={["Category", "Period total"]}
               rows={[
                 [
                   "Opening cash including restricted",

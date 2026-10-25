@@ -1790,10 +1790,11 @@ export class FinanceStore {
       entity,
     );
   }
-  budgetsRaw(entity: string) {
+  budgetsRaw(entity: string, includeArchived = false) {
     return this.all(
-      `SELECT b.*,COALESCE((SELECT SUM(s.amount_minor) FROM spends s WHERE s.entity_id=b.entity_id AND s.department=b.department AND s.category=b.category AND substr(s.date,1,7)=b.period AND s.status IN ('approved','scheduled','paid','reconciled') AND NOT EXISTS(SELECT 1 FROM journals j WHERE j.source_id=s.id AND j.idempotency_key=s.id||':expense' AND j.status='posted') AND NOT EXISTS(SELECT 1 FROM spends child WHERE child.parent_id=s.id AND child.status IN ('approved','scheduled','paid','reconciled','posted'))),0) AS committed_minor,COALESCE((SELECT SUM(l.debit-l.credit) FROM lines l JOIN journals j ON j.id=l.journal_id JOIN spends s ON s.id=j.source_id JOIN accounts a ON a.entity_id=l.entity_id AND a.code=l.account WHERE s.entity_id=b.entity_id AND s.department=b.department AND s.category=b.category AND substr(j.date,1,7)=b.period AND j.status='posted' AND a.type='expense'),0) AS actual_minor FROM budgets b WHERE b.entity_id=?`,
+      `SELECT b.*,COALESCE(m.revision,0) revision,COALESCE(m.archived,0) archived,m.updated_at,COALESCE((SELECT SUM(s.amount_minor) FROM spends s WHERE s.entity_id=b.entity_id AND s.department=b.department AND s.category=b.category AND substr(s.date,1,7)=b.period AND s.status IN ('approved','scheduled','paid','reconciled') AND NOT EXISTS(SELECT 1 FROM journals j WHERE j.source_id=s.id AND j.idempotency_key=s.id||':expense' AND j.status='posted') AND NOT EXISTS(SELECT 1 FROM spends child WHERE child.parent_id=s.id AND child.status IN ('approved','scheduled','paid','reconciled','posted'))),0) AS committed_minor,COALESCE((SELECT SUM(l.debit-l.credit) FROM lines l JOIN journals j ON j.id=l.journal_id JOIN spends s ON s.id=j.source_id JOIN accounts a ON a.entity_id=l.entity_id AND a.code=l.account WHERE s.entity_id=b.entity_id AND s.department=b.department AND s.category=b.category AND substr(j.date,1,7)=b.period AND j.status='posted' AND a.type='expense'),0) AS actual_minor FROM budgets b LEFT JOIN budget_meta m ON m.budget_id=b.id WHERE b.entity_id=? AND (?=1 OR COALESCE(m.archived,0)=0) ORDER BY b.period DESC,b.department,b.category`,
       entity,
+      includeArchived ? 1 : 0,
     ).map((b) => {
       const recorded = this.get(
         "SELECT COALESCE(SUM(amount_minor),0) AS total FROM bookkeeping_records WHERE entity_id=? AND department=? AND category=? AND substr(date,1,7)=? AND voided=0",

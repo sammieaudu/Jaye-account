@@ -1,6 +1,6 @@
 // Isolated QA artifact; never writes to the workspace database.
 import { mkdirSync, writeFileSync } from "node:fs";
-import { defaults, eventSchema } from "../src/financial/types";
+import { defaults, eventSchema, addDays, days } from "../src/financial/types";
 import { calculate, Input } from "../src/financial/engine";
 import { exportFinancialWorkbook } from "../src/financial/workbook";
 async function main() {
@@ -130,6 +130,27 @@ async function main() {
       },
       receipt,
     ];
+  }
+  if (process.env.JAYE_QA_START && process.env.JAYE_QA_END) {
+    const start = process.env.JAYE_QA_START,
+      end = process.env.JAYE_QA_END;
+    Object.assign(input.resources.find((r) => r.kind === "config")!.data, {
+      start_date: start,
+      end_date: end,
+      cutoff: addDays(start, -1),
+    });
+    for (const r of input.resources) {
+      if (r.kind === "funding")
+        Object.assign(r.data, { date: start, status: "planned" });
+      if (r.kind === "cost")
+        Object.assign(r.data, {
+          start_date: start,
+          pay_date: start,
+          end_date: end,
+        });
+      if (r.kind === "assumption")
+        r.data.launch_delay = Math.max(0, days(start, end) - 2);
+    }
   }
   const out = process.env.JAYE_QA_DIR || "/tmp/jaye-fm-validation";
   mkdirSync(out, { recursive: true });

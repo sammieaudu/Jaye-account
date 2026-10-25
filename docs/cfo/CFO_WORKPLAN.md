@@ -1,6 +1,6 @@
 # Lagos pilot financial workspace
 
-Mandate: an editable, persistent 90-day operating model inside Jaye Finance, using the existing interface. Deployment was authorized on 25 October 2026. Real transfers and production-data replacement remain outside the mandate.
+Mandate: an editable, persistent operating model with a 90-day default and custom 1–366-day periods inside Jaye Finance, using the existing interface. Deployment was authorized on 25 October 2026. Real transfers and production-data replacement remain outside the mandate.
 
 Target period: 1 December 2026–28 February 2027 (editable, provisional). NGN operations. Planned funding envelope NGN 60m–70m; NGN 65m midpoint, not received cash. Long-term investment returns and exit valuation are outside this pilot mandate.
 
@@ -16,4 +16,6 @@ Target period: 1 December 2026–28 February 2027 (editable, provisional). NGN o
 
 Validation evidence is recorded in MODEL_CHANGELOG.md. Completion requires passed checks, not merely generated files. External operational-provider access and final business assumptions remain dependencies; they do not prevent building import/configuration interfaces.
 
-Release verification: 137 tests, API/web type checks and production build pass. Independent formula parity and all 17 worksheet previews were checked. Configurable interfaces are delivered; operational evidence, provider activation, tax applicability and shared-driver segment allocation remain dependencies described in CFO_HANDOFF.md.
+Release verification: 144 tests, API/web type checks and production build pass. Independent formula parity and all 17 worksheet previews were checked. Configurable interfaces are delivered; operational evidence, provider activation, tax applicability and shared-driver segment allocation remain dependencies described in CFO_HANDOFF.md.
+
+Custom-period follow-up: implemented and verified. Inclusive date controls, dynamic statements/Excel and monthly budget CRUD/history retain the existing interface. Budget amounts can be revised; used lines can be archived, with posted accounting records and frozen snapshots preserved. Follow-up changes are local and not deployed.

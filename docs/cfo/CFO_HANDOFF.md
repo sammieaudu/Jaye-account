@@ -1,10 +1,12 @@
 # CFO handoff
 
-Implemented on `Jaye-financial-model`. Open **Planning & reports → Financial Model** in the existing application. The user authorized merging to main and deployment on 25 October 2026. Release validation passed again; production deployment is pending access to the existing Vercel and Railway projects. No money movement, external communications or production-record tests were performed.
+Initial release merged to `main`; the custom-period and budget-CRUD follow-up is implemented locally on `main`. Open **Planning & reports → Financial Model** in the existing application. The user authorized merging to main and deployment on 25 October 2026. Release validation passed again; production deployment is pending access to the existing Vercel and Railway projects. No money movement, external communications or production-record tests were performed.
 
 ## What is available
 
 - Persistent services, effective-dated pricing, scenarios, assumptions, costs/hiring/marketing/capex, funding, allocations, KPI thresholds and source configuration. Drafts support edits, history, cloning where appropriate, archive/restore and unreferenced deletion.
+- Custom inclusive start/end dates support 1–366 days. Legacy configurations retain their original 90-day end date. Statements, checkpoints and Excel exports follow the selected window; changing dates does not move dated funding, costs or pricing, or rewrite frozen snapshots.
+- Monthly departmental budgets now support create/read/update, archive/restore, deletion of unused lines and revision history. Permissions, retry protection and stale-edit checks apply. Recorded activity prevents deletion or changing the month/department/category; amount revisions retain history. Monthly budgets are separate from financial-model cost schedules and frozen scenario snapshots; changes do not post ledger entries.
 - Lagos pilot defaults: 1 December 2026 through 28 February 2027, 90 inclusive days. Founder pricing is configured; courier fee remains blank. The NGN 65m planning midpoint never becomes received cash automatically.
 - Pure daily financial engine with separate actual and forecast periods, earned/deferred subscription revenue, agent commissions, restricted settlement funds, collections, refunds, costs, payables, prepayments, depreciation and financing. P&L, balance sheet, cash flow, weekly/monthly/checkpoint views and service contribution use the same calculation output.
 - Conservative/Base/Aggressive cases, independent funding sensitivity, frozen budgets and forecast snapshots. Unknown operations and expenses are not seeded with fictitious activity.
@@ -17,10 +19,12 @@ Implemented on `Jaye-financial-model`. Open **Planning & reports → Financial M
 ## Verification
 
 - `npm run typecheck`: API and web pass.
-- `npm test`: 137 tests pass, including 24 financial tests and hosted individual-attribution checks.
+- `npm test`: 144 tests pass, including custom-period, leap-year, budget CRUD/persistence, permissions, history and hosted individual-attribution checks.
 - `npm run build`: API and optimized Next.js production build pass.
 - Browser QA used a separate temporary SQLite database: navigation, funding creation/persistence, snapshot creation, Excel download, CSV preview/acceptance, provenance and narrow-screen layout. Existing screens remain in the original shell.
 - Independent artifact-tool recalculation reconciled all three scenarios for both a full forecast fixture and a mixed actual/forecast fixture: monthly revenue/profit, 90-day revenue/profit/cash, operating/investing/financing cash and balance checks. Editing volume, price and cost quantity recalculated to the same engine results. No formula errors found. All 17 worksheet preview renders inspected.
+
+Follow-up verification: custom date and budget forms were inspected locally without saving changes to existing records. The budget layout was checked at 390px width. Independent Excel recalculation passed all three scenarios for a 3-day leap-year window and a 136-day window, including monthly totals, cash, balance checks and changed volume/price/quantity inputs; no formula errors were found. All 17 sheets were rendered for both fixtures; period-dependent statement previews were inspected.
 
 Fixtures are synthetic verification data, not a Jaye forecast. No synthetic workbook is delivered as actual management accounts.
 
@@ -47,3 +51,5 @@ The exact HTTP schema and authentication notes are downloadable from the workspa
 Run `npx tsx apps/api/test/export-financial-fixture.ts`, then run it with `JAYE_QA_DIR=/tmp/jaye-fm-validation/mixed JAYE_QA_MIXED=1`. Run `node apps/api/test/verify-financial-export.mjs` in an environment with `@oai/artifact-tool` available (or supply `JAYE_ARTIFACT_MODULE` pointing to its installed entry). This optional independent verifier is not a production dependency. It writes fixture workbooks, expected results, comparison results and sheet previews under `/tmp/jaye-fm-validation`.
 
 Next management action: enter evidence-backed opening balances, dated funding, separate driver segments and cost schedules; import operational records; resolve exceptions; freeze the original budget. Deployment is authorized; complete it after access to the existing production projects is restored.
+
+Custom-range reproduction: supply `JAYE_QA_START`, `JAYE_QA_END` and a distinct `JAYE_QA_DIR` to the fixture exporter. Pass the resulting directories as comma-separated `JAYE_QA_DATASETS` to the verifier; `JAYE_QA_RENDER=1` also renders previews. Latest local verification artifacts: `/tmp/jaye-range-validation`. This follow-up has not been deployed.

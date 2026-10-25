@@ -145,3 +145,8 @@ CREATE TABLE IF NOT EXISTS fm_imports(id TEXT PRIMARY KEY,entity_id TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS fm_snapshots(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL,name TEXT NOT NULL,kind TEXT NOT NULL,scenario_id TEXT NOT NULL,input_json TEXT NOT NULL,result_json TEXT NOT NULL,created_at TEXT NOT NULL,actor_id TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS fm_snapshot_immutable BEFORE UPDATE ON fm_snapshots BEGIN SELECT RAISE(ABORT,'Snapshots are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS fm_event_history_immutable BEFORE UPDATE ON fm_event_history BEGIN SELECT RAISE(ABORT,'Event history is immutable'); END;
+CREATE TABLE IF NOT EXISTS budget_meta(budget_id TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS budget_history(id INTEGER PRIMARY KEY AUTOINCREMENT,entity_id TEXT NOT NULL,budget_id TEXT NOT NULL,revision INTEGER NOT NULL,action TEXT NOT NULL,data TEXT NOT NULL,actor_id TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(budget_id,revision));
+CREATE TABLE IF NOT EXISTS budget_requests(entity_id TEXT NOT NULL,request_key TEXT NOT NULL,payload_hash TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(entity_id,request_key));
+CREATE TRIGGER IF NOT EXISTS budget_history_no_update BEFORE UPDATE ON budget_history BEGIN SELECT RAISE(ABORT,'Budget history is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS budget_history_no_delete BEFORE DELETE ON budget_history BEGIN SELECT RAISE(ABORT,'Budget history is immutable'); END;

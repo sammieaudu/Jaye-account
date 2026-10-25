@@ -29,6 +29,7 @@ import type { NestExpressApplication } from "@nestjs/platform-express";
 import type { Request, Response } from "express";
 import { FinanceStore, DomainError, csv } from "./domain";
 import { resolve } from "node:path";
+import { BudgetService } from "./budgets";
 import { FinancialService } from "./financial/service";
 import { exportFinancialWorkbook } from "./financial/workbook";
 
@@ -146,8 +147,30 @@ class Api {
       id,
     );
   }
-  @Get("financial/imports/:id") financialImportRead(@Req() req:Request,@Query("entity") entity:string,@Param("id") id:string){return new FinancialService(this.store).readImport(this.financialActor(req),entity,id);}
-  @Post("financial/imports/:id/replace") financialImportReplace(@Req() req:Request,@Query("entity") entity:string,@Param("id") id:string,@Body() input:any){return new FinancialService(this.store).replaceDraft(this.financialActor(req),entity,id,input);}
+  @Get("financial/imports/:id") financialImportRead(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Param("id") id: string,
+  ) {
+    return new FinancialService(this.store).readImport(
+      this.financialActor(req),
+      entity,
+      id,
+    );
+  }
+  @Post("financial/imports/:id/replace") financialImportReplace(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new FinancialService(this.store).replaceDraft(
+      this.financialActor(req),
+      entity,
+      id,
+      input,
+    );
+  }
   @Post("financial/imports/preview") financialPreview(
     @Req() req: Request,
     @Query("entity") entity: string,
@@ -227,7 +250,7 @@ class Api {
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="jaye-90-day-${id}.xlsx"`,
+      `attachment; filename="jaye-financial-model-${id}.xlsx"`,
     );
     res.send(Buffer.from(bytes));
   }
@@ -638,7 +661,55 @@ class Api {
     @Req() req: Request,
     @Query("entity") entity: string,
   ) {
-    return this.store.budgets(this.actor(req), entity);
+    return new BudgetService(this.store).list(
+      this.financialActor(req),
+      entity,
+      req.query.archived === "1",
+    );
+  }
+  @Get("budgets/access") budgetAccess(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+  ) {
+    const a = this.financialActor(req);
+    this.store.authorize(a, entity, ["manager", "finance", "cfo", "auditor"]);
+    return { can_write: ["finance", "cfo"].includes(a.role) };
+  }
+  @Post("budgets") createBudget(@Req() req: Request, @Body() input: any) {
+    return new BudgetService(this.store).save(this.financialActor(req), input);
+  }
+  @Post("budgets/:id") updateBudget(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new BudgetService(this.store).save(
+      this.financialActor(req),
+      input,
+      id,
+    );
+  }
+  @Post("budgets/:id/action") budgetAction(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new BudgetService(this.store).action(
+      this.financialActor(req),
+      id,
+      input,
+    );
+  }
+  @Get("budgets/:id/history") budgetHistory(
+    @Req() req: Request,
+    @Param("id") id: string,
+    @Query("entity") entity: string,
+  ) {
+    return new BudgetService(this.store).history(
+      this.financialActor(req),
+      entity,
+      id,
+    );
   }
   @Get("journals") journals(
     @Req() req: Request,

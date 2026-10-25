@@ -7,13 +7,20 @@ const { FileBlob, SpreadsheetFile } = await import(
 const root = process.env.JAYE_QA_DIR || "/tmp/jaye-fm-validation";
 const cases = ["conservative", "base", "aggressive"];
 const findings = [];
-for (const dir of [root, `${root}/mixed`]) {
+for (const dir of process.env.JAYE_QA_DATASETS?.split(",") || [
+  root,
+  `${root}/mixed`,
+]) {
   const wb = await SpreadsheetFile.importXlsx(
     await FileBlob.load(`${dir}/model.xlsx`),
   );
   const expected = JSON.parse(
     await fs.readFile(`${dir}/expected.json`, "utf8"),
   );
+  const dayRow = expected.base.daily.length + 1,
+    monthCount = expected.base.monthly.length;
+  const column = (n) => String.fromCharCode(64 + n);
+  const totalColumn = column(monthCount + 2);
   const near = (value, expected, label) =>
     assert.ok(
       typeof value === "number" && Math.abs(value - expected) < 0.005,
@@ -22,16 +29,19 @@ for (const dir of [root, `${root}/mixed`]) {
   for (const scenario of cases) {
     wb.worksheets.getItem("Read Me").getRange("B4").values = [[scenario]];
     wb.recalculate();
-    const pnl = wb.worksheets.getItem("P&L").getRange("B2:E12").values;
-    const cash = wb.worksheets.getItem("Daily Cash and PL").getRange("M91:S91")
-      .values[0];
+    const pnl = wb.worksheets
+      .getItem("P&L")
+      .getRange(`B2:${totalColumn}12`).values;
+    const cash = wb.worksheets
+      .getItem("Daily Cash and PL")
+      .getRange(`M${dayRow}:S${dayRow}`).values[0];
     const cf = wb.worksheets
       .getItem("Cash Flow")
       .getRange("B2:B7")
       .values.flat();
     const e = expected[scenario];
-    near(pnl[0][3], e.summary.revenue / 100, "revenue");
-    near(pnl[10][3], e.summary.net_income / 100, "profit");
+    near(pnl[0][monthCount], e.summary.revenue / 100, "revenue");
+    near(pnl[10][monthCount], e.summary.net_income / 100, "profit");
     near(cash[0], e.summary.closing_cash / 100, "cash");
     near(cash[5], 0, "balance");
     e.monthly.forEach((m, i) => {
@@ -76,17 +86,18 @@ for (const dir of [root, `${root}/mixed`]) {
     await fs.readFile(`${dir}/expected-edited.json`, "utf8"),
   );
   near(
-    wb.worksheets.getItem("P&L").getRange("E2").values[0][0],
+    wb.worksheets.getItem("P&L").getRange(`${totalColumn}2`).values[0][0],
     edited.summary.revenue / 100,
     "edited revenue",
   );
   near(
-    wb.worksheets.getItem("P&L").getRange("E12").values[0][0],
+    wb.worksheets.getItem("P&L").getRange(`${totalColumn}12`).values[0][0],
     edited.summary.net_income / 100,
     "edited profit",
   );
   near(
-    wb.worksheets.getItem("Daily Cash and PL").getRange("M91").values[0][0],
+    wb.worksheets.getItem("Daily Cash and PL").getRange(`M${dayRow}`)
+      .values[0][0],
     edited.summary.closing_cash / 100,
     "edited cash",
   );
@@ -104,7 +115,7 @@ for (const dir of [root, `${root}/mixed`]) {
     errors: errors.ndjson,
   });
   console.log(JSON.stringify(findings.at(-1)));
-  if (dir.endsWith("/mixed")) {
+  if (dir.endsWith("/mixed") || process.env.JAYE_QA_RENDER === "1") {
     for (const name of [
       "Read Me",
       "Assumptions",
@@ -128,9 +139,9 @@ for (const dir of [root, `${root}/mixed`]) {
         name === "Read Me"
           ? "A1:B11"
           : name === "P&L"
-            ? "A1:E12"
+            ? `A1:${totalColumn}12`
             : name === "Balance Sheet"
-              ? "A1:E17"
+              ? `A1:${column(expected.base.checkpoints.length + 2)}17`
               : name === "Definitions and Warnings"
                 ? "A1:B10"
                 : "A1:F7";

@@ -2,7 +2,7 @@
 // used by the verification harness, not required on the production API host.
 import ExcelJS from "exceljs";
 import { Input, calculate, Flow } from "./engine";
-import { accounts, addDays, coverageEnd, days } from "./types";
+import { accounts, addDays, coverageEnd, days, version } from "./types";
 
 export async function exportFinancialWorkbook(
   input: Input,
@@ -40,7 +40,7 @@ export async function exportFinancialWorkbook(
     };
     return s;
   };
-  const read = sheet("Read Me", ["Jaye · Lagos 90-day pilot", "Details"]);
+  const read = sheet("Read Me", ["Jaye · Lagos financial model", "Details"]);
   read.getColumn(2).width = 95;
   read.addRows([
     ["Snapshot", snapshotId],
@@ -50,7 +50,7 @@ export async function exportFinancialWorkbook(
       "Currency / calculation units",
       "NGN; input money and flow calculations use kobo, outputs show naira",
     ],
-    ["Model version", "1.0.0"],
+    ["Model version", version],
     [
       "Editable cells",
       "Blue inputs: volumes, rates, prices, costs and dated funding amounts. Green formulas link schedules.",
@@ -291,6 +291,14 @@ export async function exportFinancialWorkbook(
     "Debit-positive · kobo",
   ]);
   const base = calculate(input, scenarioId);
+  read.getCell("B11").value = base.cutoff;
+  const lastDailyRow = base.daily.length + 1;
+  const checkpointRows = base.checkpoints.map((c) => c.day + 1);
+  read.addRows([
+    ["Period start", base.start],
+    ["Period end", base.end],
+    ["Days (inclusive)", base.daily.length],
+  ]);
   accounts.forEach((a) => opening.addRow([a, base.opening[a]]));
   const sourceById = new Map(input.resources.map((r) => [r.id, r]));
   const carried = (id: string, launch: string) =>
@@ -474,7 +482,7 @@ export async function exportFinancialWorkbook(
   const col = (a: string) =>
     balances.getColumn(accounts.indexOf(a as any) + 2).letter;
   const b = (a: string, row: number) => `'Daily Accounts'!${col(a)}${row}`;
-  for (let n = 0; n < 90; n++) {
+  for (let n = 0; n < base.daily.length; n++) {
     const d = addDays(base.start, n),
       r = n + 2;
     balances.addRow([d]);
@@ -517,7 +525,7 @@ export async function exportFinancialWorkbook(
   const pnl = sheet("P&L", [
     "Metric · NGN",
     ...base.monthly.map((m) => m.period),
-    "90-day total",
+    "Period total",
   ]);
   const metrics = [
     ["Revenue", "B"],
@@ -543,15 +551,13 @@ export async function exportFinancialWorkbook(
       };
     });
     pnl.getCell(r, base.monthly.length + 2).value = {
-      formula: `SUM('Daily Cash and PL'!${c}2:${c}91)`,
+      formula: `SUM('Daily Cash and PL'!${c}2:${c}${lastDailyRow})`,
     };
   });
   const bs = sheet("Balance Sheet", [
     "Account · NGN",
     "Opening",
-    "Day 30",
-    "Day 60",
-    "Day 90",
+    ...base.checkpoints.map((c) => `Day ${c.day} · ${c.date}`),
   ]);
   accounts
     .filter(
@@ -585,19 +591,19 @@ export async function exportFinancialWorkbook(
       r.getCell(2).value = {
         formula: `'Opening Balances'!B${i + 2}*${sign}/100`,
       };
-      [31, 61, 91].forEach(
+      checkpointRows.forEach(
         (d, j) =>
           (r.getCell(j + 3).value = { formula: `${b(a, d)}*${sign}/100` }),
       );
     });
-  const earnings = bs.addRow(["Pilot earnings"]);
-  [31, 61, 91].forEach(
+  const earnings = bs.addRow(["Period earnings"]);
+  checkpointRows.forEach(
     (d, j) =>
       (earnings.getCell(j + 3).value = {
         formula: `SUM('Daily Cash and PL'!L2:L${d})`,
       }),
   );
-  const cf = sheet("Cash Flow", ["Metric · NGN", "90-day total"]);
+  const cf = sheet("Cash Flow", ["Metric · NGN", "Period total"]);
   const cashType = (f: Flow) =>
     [f.debit, f.credit].some((a) => ["equity", "debt"].includes(a))
       ? "financing"
@@ -631,7 +637,9 @@ export async function exportFinancialWorkbook(
   cf.addRow(["Closing cash", { formula: "SUM(B2:B5)" }]);
   cf.addRow([
     "Cash reconciliation",
-    { formula: "B6-'Daily Cash and PL'!M91-'Daily Cash and PL'!N91" },
+    {
+      formula: `B6-'Daily Cash and PL'!M${lastDailyRow}-'Daily Cash and PL'!N${lastDailyRow}`,
+    },
   ]);
   const cases = sheet("Scenario Comparison", [
     "Scenario",
@@ -707,8 +715,8 @@ export async function exportFinancialWorkbook(
   checks.getColumn(3).width = 90;
   checks.addRows([
     [
-      "Day 90 balance",
-      { formula: "'Daily Cash and PL'!R91" },
+      "Period-end balance",
+      { formula: `'Daily Cash and PL'!R${lastDailyRow}` },
       "Zero means arithmetic balances; completeness is separate.",
     ],
     [
@@ -719,7 +727,7 @@ export async function exportFinancialWorkbook(
     [
       "Revenue tie",
       {
-        formula: `'P&L'!${pnl.getColumn(base.monthly.length + 2).letter}2-SUM('Daily Cash and PL'!B2:B91)`,
+        formula: `'P&L'!${pnl.getColumn(base.monthly.length + 2).letter}2-SUM('Daily Cash and PL'!B2:B${lastDailyRow})`,
       },
       "P&L reconciles to daily schedule.",
     ],

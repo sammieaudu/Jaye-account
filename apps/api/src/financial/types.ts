@@ -39,23 +39,38 @@ export const accounts = [
 ] as const;
 export type Account = (typeof accounts)[number];
 export const resourceSchemas = {
-  config: z.object({
-    name,
-    start_date: day,
-    cutoff: day,
-    city: z.literal("Lagos"),
-    opening_confirmed: z.boolean(),
-    operating_data_complete_through: day.nullable(),
-    tax_reviewed: z.boolean(),
-    tax_note: note,
-    planned_funding_minor: money,
-    minimum_cash_minor: money,
-    opening: z.partialRecord(
-      z.enum(accounts),
-      z.number().int().min(-1e13).max(1e13),
-    ),
-    source: note,
-  }),
+  config: z
+    .object({
+      name,
+      start_date: day,
+      end_date: day.optional(),
+      cutoff: day,
+      city: z.literal("Lagos"),
+      opening_confirmed: z.boolean(),
+      operating_data_complete_through: day.nullable(),
+      tax_reviewed: z.boolean(),
+      tax_note: note,
+      planned_funding_minor: money,
+      minimum_cash_minor: money,
+      opening: z.partialRecord(
+        z.enum(accounts),
+        z.number().int().min(-1e13).max(1e13),
+      ),
+      source: note,
+    })
+    .transform((v) => ({
+      ...v,
+      end_date: v.end_date ?? addDays(v.start_date, 89),
+    }))
+    .superRefine((v, c) => {
+      const length = days(v.start_date, v.end_date) + 1;
+      if (length < 1 || length > 366)
+        c.addIssue({
+          code: "custom",
+          path: ["end_date"],
+          message: "Choose a date range of 1–366 days, inclusive",
+        });
+    }),
   service: z.object({
     name,
     vehicle: z.enum(["car", "keke", "bike", "shared"]),
@@ -291,7 +306,7 @@ export type Event = z.infer<typeof eventSchema> & {
   imported_at?: string;
   price_snapshot?: any;
 };
-export const version = "1.0.0";
+export const version = "1.1.0";
 export function addDays(d: string, n: number) {
   return new Date(Date.parse(d) + n * 86400000).toISOString().slice(0, 10);
 }
@@ -321,7 +336,7 @@ export function defaults(): { id: string; kind: Kind; data: any }[] {
       id: "pilot",
       kind: "config",
       data: {
-        name: "Lagos 90-day pilot",
+        name: "Lagos financial model",
         start_date: start,
         cutoff: "2026-11-30",
         city: "Lagos",
