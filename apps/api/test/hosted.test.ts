@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { FinanceStore } from "../src/domain";
@@ -22,7 +22,7 @@ test("hosted backend denies anonymous and local identity access, and preserves d
     db: process.env.JAYE_DB_PATH,
     test: process.env.JAYE_TEST,
   };
-  const dir = mkdtempSync(join(tmpdir(), "jaye-hosted-"));
+  const dir = mkdtempSync(join(homedir(), ".jaye-hosted-test-"));
   process.env.JAYE_MODE = "hosted";
   process.env.JAYE_TEST = "1";
   delete process.env.JAYE_API_SECRET;
