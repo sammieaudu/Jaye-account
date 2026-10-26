@@ -1,3 +1,4 @@
+import { managementExclusions } from "./provenance";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { FinanceStore, DomainError, categories, type Actor } from "./domain";
@@ -52,7 +53,10 @@ export class BudgetService {
   }
   list(a: Actor, entity: string, archived = false) {
     this.access(a, entity);
-    return this.s.budgetsRaw(entity, archived);
+    const samples = managementExclusions(this.s, entity).budgets;
+    return this.s
+      .budgetsRaw(entity, archived)
+      .map((row) => ({ ...row, sample_only: samples.includes(row.id) }));
   }
   history(a: Actor, entity: string, id: string) {
     this.access(a, entity);

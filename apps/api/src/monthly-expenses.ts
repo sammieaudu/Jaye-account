@@ -1,3 +1,4 @@
+import { managementExclusions } from "./provenance";
 import ExcelJS from "exceljs";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -576,6 +577,7 @@ export class MonthlyExpenseService {
       "SELECT currency FROM entities WHERE id=?",
       e,
     ).currency;
+    const excluded = managementExclusions(this.s, e);
     const all = this.s
       .all(
         `SELECT j.id,j.date,j.description,j.idempotency_key,j.source_id,l.account,ac.name AS account_name,SUM(l.debit-l.credit) AS amount_minor,
@@ -589,6 +591,7 @@ export class MonthlyExpenseService {
       WHERE j.entity_id=? AND j.status='posted' AND ac.type='expense' GROUP BY j.id,l.account`,
         e,
       )
+      .filter((r) => !excluded.journals.includes(r.id))
       .map((r) => ({
         ...r,
         category:
@@ -644,6 +647,7 @@ export class MonthlyExpenseService {
     );
     const budgets = this.s
       .budgetsRaw(e)
+      .filter((b) => !excluded.budgets.includes(b.id))
       .filter(
         (r) =>
           r.period >= from.slice(0, 7) &&
@@ -696,7 +700,10 @@ export class MonthlyExpenseService {
     const trendStart = new Date(from.slice(0, 7) + "-01T00:00:00Z");
     if (from.slice(0, 7) === to.slice(0, 7))
       trendStart.setUTCMonth(trendStart.getUTCMonth() - 5);
-    const trendBudgets = this.s.budgetsRaw(e).filter(match);
+    const trendBudgets = this.s
+      .budgetsRaw(e)
+      .filter((b) => !excluded.budgets.includes(b.id))
+      .filter(match);
     for (
       let d = trendStart;
       d.toISOString().slice(0, 7) <= to.slice(0, 7);
@@ -757,6 +764,9 @@ export class MonthlyExpenseService {
         from.slice(0, 7),
       ) || { status: "open" },
       notes: [
+        ...(excluded.journals.length || excluded.budgets.length
+          ? [excluded.note]
+          : []),
         "Actuals use posted expense journal entries, including corrections and refunds.",
         "Cash and outstanding cards cover recorded bills and payroll; approval-workflow payments remain in Reporting & reconciliation.",
         "Budgets cover full calendar months touched by the selected range. Historical review amounts are unverified and excluded from actuals.",

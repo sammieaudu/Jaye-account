@@ -1,3 +1,4 @@
+import { managementExclusions } from "../provenance";
 import {
   management,
   sensitivities as operatingSensitivities,
@@ -481,6 +482,7 @@ export class FinancialService {
     });
   }
   input(entity: string): Input {
+    const excluded = managementExclusions(this.s, entity);
     const resources = this.resources(entity),
       config = resources.find((r) => r.kind === "config")!.data;
     const subscriptionService = new SubscriptionService(
@@ -533,7 +535,13 @@ export class FinancialService {
       .filter((r) => r.amount_minor > 0);
     return {
       resources,
-      budgets: this.s.budgetsRaw(entity, true),
+      budgets: this.s
+        .budgetsRaw(entity, true)
+        .filter((b) => !excluded.budgets.includes(b.id)),
+      source_notes:
+        excluded.journals.length || excluded.budgets.length
+          ? [excluded.note]
+          : [],
       vendorCosts,
       obligations,
       events: this.s
@@ -543,14 +551,18 @@ export class FinancialService {
           id: r.id,
           imported_at: r.imported_at,
         })),
-      ledger: this.s.all(
-        "SELECT j.date,l.account,a.type,(l.debit-l.credit) amount,j.id source,j.description FROM lines l JOIN journals j ON j.id=l.journal_id JOIN accounts a ON a.entity_id=l.entity_id AND a.code=l.account WHERE j.entity_id=? AND j.status='posted' ORDER BY j.date,j.id,l.id",
-        entity,
-      ),
-      pending: this.s.all(
-        "SELECT id,description,amount_minor,date,status FROM spends WHERE entity_id=? AND status IN ('approved','scheduled','paid','reconciled') AND NOT EXISTS(SELECT 1 FROM journals WHERE source_id=spends.id AND status='posted')",
-        entity,
-      ),
+      ledger: this.s
+        .all(
+          "SELECT j.date,l.account,a.type,(l.debit-l.credit) amount,j.id source,j.description FROM lines l JOIN journals j ON j.id=l.journal_id JOIN accounts a ON a.entity_id=l.entity_id AND a.code=l.account WHERE j.entity_id=? AND j.status='posted' ORDER BY j.date,j.id,l.id",
+          entity,
+        )
+        .filter((row) => !excluded.journals.includes(row.source)),
+      pending: this.s
+        .all(
+          "SELECT id,description,amount_minor,date,status FROM spends WHERE entity_id=? AND status IN ('approved','scheduled','paid','reconciled') AND NOT EXISTS(SELECT 1 FROM journals WHERE source_id=spends.id AND status='posted')",
+          entity,
+        )
+        .filter((row) => !excluded.spends.includes(row.id)),
       invoiceReceipts: this.s.all(
         "SELECT p.id,p.invoice_id,p.amount_minor,p.date FROM sales_invoice_payments p JOIN sales_invoices i ON i.id=p.invoice_id WHERE i.entity_id=? AND p.voided_at IS NULL",
         entity,

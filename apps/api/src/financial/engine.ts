@@ -48,6 +48,7 @@ export type Input = {
   obligations?: any[];
   budgets?: any[];
   captured_at: string;
+  source_notes?: string[];
 };
 const expenseAccounts: Account[] = [
   "direct_cost",
@@ -1130,6 +1131,7 @@ export function calculate(
     calculated_at: new Date().toISOString(),
     currency: "NGN",
     warnings: [...new Set(warnings)],
+    source_notes: input.source_notes || [],
     complete: warnings.length === 0,
     opening,
     flows: flows.filter((f) => f.date >= start && f.date <= end),
@@ -1286,9 +1288,7 @@ export function pmf(
     if (!cur || e.date < cur) firstRegistration.set(key, e.date);
   }
   const newPeople = (audience: string) => [
-    ...new Set(
-      registrations.filter((e) => e.type === audience).map(personId),
-    ),
+    ...new Set(registrations.filter((e) => e.type === audience).map(personId)),
   ];
   const campaigns = observed.filter((e) => e.type === "campaign");
   const attributedIds = (a: string) =>
@@ -1403,9 +1403,7 @@ export function pmf(
           .map((e) => e.driver_id),
       );
       const activeDrivers = new Set(jobs.map((e) => e.driver_id));
-      const payingDriverDays = total(
-        subs.map((e) => overlapDays(e, from, to)),
-      );
+      const payingDriverDays = total(subs.map((e) => overlapDays(e, from, to)));
       const requested = bookings.filter(inWeek).length;
       weekly.push({
         week: w,
@@ -1463,9 +1461,7 @@ export function pmf(
   ]
     .sort()
     .map((month) => {
-      const members = driverRegistered.filter((d) =>
-        d.date.startsWith(month),
-      );
+      const members = driverRegistered.filter((d) => d.date.startsWith(month));
       const paid = members.filter((m) => payingIds.has(m.id)).length;
       const window = (n: number) => {
         const eligibleMembers = members.filter((m) => mature(m.date, n));
@@ -1478,9 +1474,7 @@ export function pmf(
             ) ||
             subs.some(
               (e) =>
-                e.driver_id === m.id &&
-                e.date <= to &&
-                e.coverage_end! > from,
+                e.driver_id === m.id && e.date <= to && e.coverage_end! > from,
             )
           );
         });
@@ -1499,8 +1493,7 @@ export function pmf(
         d60: window(60),
       };
     });
-  const byStatus = (s: string) =>
-    bookings.filter((e) => e.status === s).length;
+  const byStatus = (s: string) => bookings.filter((e) => e.status === s).length;
   const reachedAcceptance =
     byStatus("accepted") + byStatus("completed") + byStatus("paid");
   const matchMinutes = completed
@@ -1541,8 +1534,7 @@ export function pmf(
     subscription_burden_median: median(
       driverEconomics
         .filter(
-          (d) =>
-            d.subscription_cost > 0 && d.gross_bookings - d.commission > 0,
+          (d) => d.subscription_cost > 0 && d.gross_bookings - d.commission > 0,
         )
         .map((d) => d.subscription_burden!),
     ),
@@ -1563,9 +1555,7 @@ export function pmf(
               completed.filter((e) => ids.has(e.driver_id)).map(commissionOf),
             )
           : total(
-              completed
-                .filter((e) => ids.has(e.customer_id))
-                .map(commissionOf),
+              completed.filter((e) => ids.has(e.customer_id)).map(commissionOf),
             );
       const observedDays = total(
         [...ids].map(

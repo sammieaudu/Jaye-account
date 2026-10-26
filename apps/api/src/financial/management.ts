@@ -410,9 +410,12 @@ export function management(input: Input, r: ReturnType<typeof calculate>) {
       minimum,
       shortfall: first?.date || null,
       gap: Math.max(0, config.minimum_cash_minor - minimum),
-      runway: first
-        ? `Reserve breached on ${first.date}`
-        : "Beyond the modelled horizon",
+      runway:
+        !config.opening_confirmed || !currentCosts.length
+          ? "Not measurable · opening cash or cost schedules incomplete"
+          : first
+            ? `Reserve breached on ${first.date}`
+            : "Beyond the modelled horizon",
       average_daily_operating_burn: actual.length
         ? Math.max(0, -unrestrictedOperating / actual.length)
         : null,

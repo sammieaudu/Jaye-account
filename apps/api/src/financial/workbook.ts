@@ -760,6 +760,9 @@ export async function exportFinancialWorkbook(
   for (const [k, v] of Object.entries(base.pmf.definitions))
     definitions.addRow([k, v]);
   base.warnings.forEach((w) => definitions.addRow(["Unresolved", w]));
+  (base.source_notes || []).forEach((note) =>
+    definitions.addRow(["Source policy", note]),
+  );
   const checks = sheet("Checks", [
     "Check",
     "Difference · NGN",

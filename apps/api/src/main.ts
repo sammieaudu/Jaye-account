@@ -1,3 +1,4 @@
+import { ExecutiveService } from "./executive";
 import { exportInvestorWorkbook } from "./financial/investor-workbook";
 import { MonthlyExpenseService } from "./monthly-expenses";
 import { InvoiceService } from "./invoices";
@@ -516,6 +517,39 @@ class Api {
   }
   @Post("categories") addCategory(@Req() req: Request, @Body() input: any) {
     return this.store.addCategory(this.actor(req), input);
+  }
+  @Get("executive") executive(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Query("period") period: string,
+  ) {
+    return new ExecutiveService(this.store).overview(
+      this.financialActor(req),
+      entity,
+      period,
+    );
+  }
+  @Post("executive/cash-review") executiveCash(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Body() input: any,
+  ) {
+    return new ExecutiveService(this.store).cashReview(
+      this.financialActor(req),
+      entity,
+      input,
+    );
+  }
+  @Post("executive/gates") executiveGate(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Body() input: any,
+  ) {
+    return new ExecutiveService(this.store).gate(
+      this.financialActor(req),
+      entity,
+      input,
+    );
   }
   @Get("dashboard") dashboard(
     @Req() req: Request,

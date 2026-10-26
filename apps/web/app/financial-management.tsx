@@ -77,6 +77,9 @@ export function FinancialManagement({
 }) {
   const [comparison, setComparison] = useState("budget");
   const m = data.management;
+  const openingConfirmed =
+    data.resources?.find((r: Row) => r.kind === "config" && !r.archived)?.data
+      .opening_confirmed === true;
   if (!m) return null;
   if (section === "Performance")
     return (
@@ -295,13 +298,39 @@ export function FinancialManagement({
           <Table
             headers={["Measure", "Value"]}
             rows={[
-              ["Opening unrestricted cash", money(m.cash.opening)],
-              ["Closing unrestricted cash", money(m.cash.closing)],
-              ["Restricted cash", money(m.cash.restricted)],
+              [
+                "Opening unrestricted cash",
+                openingConfirmed
+                  ? money(m.cash.opening)
+                  : "Opening balance unconfirmed",
+              ],
+              [
+                "Closing unrestricted cash",
+                openingConfirmed
+                  ? money(m.cash.closing)
+                  : "Projection requires confirmed opening cash",
+              ],
+              [
+                "Restricted cash",
+                openingConfirmed ? money(m.cash.restricted) : "Unconfirmed",
+              ],
               ["Minimum reserve", money(m.cash.reserve)],
-              ["Lowest unrestricted cash", money(m.cash.minimum)],
-              ["Additional funding required", money(m.cash.gap)],
-              ["Runway", m.cash.runway],
+              [
+                "Lowest unrestricted cash",
+                openingConfirmed ? money(m.cash.minimum) : "Unconfirmed",
+              ],
+              [
+                "Additional funding required",
+                data.result.complete
+                  ? money(m.cash.gap)
+                  : "Not yet established",
+              ],
+              [
+                "Runway",
+                data.result.complete
+                  ? m.cash.runway
+                  : "Not decision-ready · missing model evidence",
+              ],
               [
                 "Observed daily unrestricted operating burn",
                 money(m.cash.average_daily_operating_burn),

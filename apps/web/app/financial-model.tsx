@@ -73,7 +73,9 @@ function pmfTiles(r: Row, m: Row | undefined) {
       title: "Driver renewal",
       value: percent(p.renewal.rate),
       sample: `${p.renewal.renewed} of ${p.renewal.eligible} eligible plans`,
-      evidence: p.renewal.eligible ? "Complete periods only" : "No eligible plans",
+      evidence: p.renewal.eligible
+        ? "Complete periods only"
+        : "No eligible plans",
     },
     {
       title: "Jobs per paying driver-day",
@@ -808,7 +810,9 @@ export default function FinancialModel({
       key === "minimum" &&
       editor!.data.metric === "jobs_per_paying_driver_week";
     const title =
-      fractions.includes(key) && !countTarget ? `${label(key)} (%)` : label(key);
+      fractions.includes(key) && !countTarget
+        ? `${label(key)} (%)`
+        : label(key);
     if (typeof value === "boolean")
       return (
         <label key={key} className="fm-check">
@@ -1092,6 +1096,11 @@ export default function FinancialModel({
           {message}
         </p>
       )}
+      {(r.source_notes || []).map((note: string) => (
+        <p className="simple-notice" key={note}>
+          {note}
+        </p>
+      ))}
       {r.warnings.length > 0 && (
         <details className="fm-warning">
           <summary>
@@ -1220,17 +1229,25 @@ export default function FinancialModel({
                 onClick={() => setTab("Statements")}
               >
                 <span>{title}</span>
-                <strong>{money(value)}</strong>
-                <small>Actual + forecast · provisional</small>
+                <strong>
+                  {r.complete ? money(value) : "Not decision-ready"}
+                </strong>
+                <small>
+                  {r.complete
+                    ? "Actual + forecast"
+                    : "Resolve missing model evidence; schedules remain available below"}
+                </small>
               </button>
             ))}
           </div>
           <section className="panel fm-panel">
             <h2>Operating cash through the selected period</h2>
             <p>
-              {r.summary.first_shortfall
-                ? `First shortfall: ${r.summary.first_shortfall}`
-                : "No shortfall in entered schedules. Missing costs or funding can change this."}
+              {!r.complete
+                ? "Cash projection is incomplete. Do not interpret a flat line or zero funding gap as evidence that the pilot is funded."
+                : r.summary.first_shortfall
+                  ? `First shortfall: ${r.summary.first_shortfall}`
+                  : "No shortfall in entered schedules. Missing costs or funding can change this."}
             </p>
             <div className="fm-chart">
               <ResponsiveContainer width="100%" height="100%">
@@ -1509,9 +1526,7 @@ export default function FinancialModel({
       {tab === tabs[5] && (
         <>
           <section
-            className={
-              r.pmf.complete_through ? "panel fm-panel" : "fm-warning"
-            }
+            className={r.pmf.complete_through ? "panel fm-panel" : "fm-warning"}
           >
             <p>
               Observed records through <strong>{r.cutoff}</strong>. Coverage
@@ -1548,10 +1563,7 @@ export default function FinancialModel({
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={r.pmf.weekly}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="week"
-                      tickFormatter={(v) => `W${v}`}
-                    />
+                    <XAxis dataKey="week" tickFormatter={(v) => `W${v}`} />
                     <YAxis allowDecimals={false} />
                     <Tooltip labelFormatter={(v) => `Week ${v}`} />
                     <Line
@@ -1713,7 +1725,10 @@ export default function FinancialModel({
                 rows={[
                   ["Bookings recorded", r.pmf.funnel.bookings],
                   ["Still requested", r.pmf.funnel.still_requested],
-                  ["Accepted, not completed", r.pmf.funnel.accepted_not_completed],
+                  [
+                    "Accepted, not completed",
+                    r.pmf.funnel.accepted_not_completed,
+                  ],
                   ["Completed", r.pmf.funnel.completed],
                   ["Cancelled", r.pmf.funnel.cancelled],
                   ["Acceptance rate", percent(r.pmf.funnel.acceptance_rate)],
@@ -1759,18 +1774,21 @@ export default function FinancialModel({
                     "Subscription burden (median)",
                     percent(r.pmf.utilisation.subscription_burden_median),
                   ],
-                  ["Paid conversion", percent(r.pmf.activation.paid_conversion)],
+                  [
+                    "Paid conversion",
+                    percent(r.pmf.activation.paid_conversion),
+                  ],
                 ]}
               />
             </section>
           </div>
           <section className="panel fm-panel">
-            <h2>Acquisition and early payback</h2>
+            <h2>Acquisition and revenue recovery</h2>
             <p>
-              CAC needs campaign IDs on registrations. Payback compares CAC
-              with observed monthly platform revenue per attributed acquisition
-              and stays labelled immature below 90 observed days. Mature LTV is
-              not reported.
+              CAC needs campaign IDs on registrations. Revenue recovery compares
+              CAC with observed monthly platform revenue per attributed
+              acquisition and stays labelled immature below 90 observed days.
+              Mature LTV is not reported.
             </p>
             <DataTable
               headers={[
@@ -1780,7 +1798,7 @@ export default function FinancialModel({
                 "CAC",
                 "Observed revenue",
                 "Monthly revenue / acquisition",
-                "Payback",
+                "Revenue recovery (months)",
                 "Maturity",
               ]}
               rows={Object.entries(r.pmf.acquisition).map(

@@ -2,6 +2,7 @@
 import Select from "./select";
 import CategorySelect from "./category-select";
 import Invoices from "./invoices";
+import ExecutiveOverview from "./executive-overview";
 import Bookkeeping from "./bookkeeping";
 import Recoveries from "./recoveries";
 import Reimbursements from "./reimbursements";
@@ -1129,7 +1130,7 @@ export default function Home() {
                 </h1>
                 <p>
                   {page === "Overview"
-                    ? "Track spend, stay in control, and keep every naira accounted for."
+                    ? "Cash confidence, spending discipline and pilot readiness."
                     : page === "Invoices"
                       ? "Create branded customer invoices, export a PDF and share it."
                       : page === "Expenses"
@@ -1296,225 +1297,244 @@ export default function Home() {
                         navigate={navigate}
                       />
                     )}
-                  {page === "Overview" && data && (
-                    <>
-                      <div className="metrics simple-dashboard-metrics">
-                        <Metric
-                          label="Total recorded costs"
-                          value={fmt(data.spend_minor, currency)}
-                          icon={<Receipt size={19} />}
-                          note="Expenses and salaries · counted once"
-                        />
-                        <Metric
-                          label="Still owed"
-                          value={fmt(
-                            data.record_summary?.owed_minor || 0,
-                            currency,
-                          )}
-                          icon={<Wallet size={19} />}
-                          note="Documented expenses and salaries"
-                        />
-                        <Metric
-                          label="Salary payments due"
-                          value={fmt(
-                            data.record_summary?.salary_owed_minor || 0,
-                            currency,
-                          )}
-                          icon={<Users size={19} />}
-                          note="Included in the amount still owed"
-                        />
-                      </div>
-                      <div className="dashboard-records-layout">
-                        <section className="panel dashboard-records">
-                          <div className="panel-heading">
-                            <div>
-                              <h2>Recent records</h2>
-                              <p>
-                                Latest expenses and salaries, with payment
-                                status.
-                              </p>
-                            </div>
-                            <button
-                              className="text-button"
-                              onClick={() => navigate("Reports")}
-                            >
-                              View reports <ArrowRight size={16} />
-                            </button>
-                          </div>
-                          {data.documented_recent?.length ? (
-                            <div className="table-scroll">
-                              <table>
-                                <thead>
-                                  <tr>
-                                    <th>Description</th>
-                                    <th>Payee</th>
-                                    <th>Cost</th>
-                                    <th>Status</th>
-                                    <th>
-                                      <span className="sr-only">Actions</span>
-                                    </th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {data.documented_recent.map((r: Row) => (
-                                    <tr key={r.id}>
-                                      <td>
-                                        {r.description}
-                                        <small>{r.date}</small>
-                                      </td>
-                                      <td>{r.payee}</td>
-                                      <td>{fmt(r.amount_minor, currency)}</td>
-                                      <td>
-                                        <span
-                                          className={`dashboard-record-status ${r.outstanding_minor === 0 ? "is-paid" : "is-due"}`}
-                                        >
-                                          {r.outstanding_minor === 0
-                                            ? "Paid"
-                                            : r.outstanding_minor <
-                                                r.amount_minor
-                                              ? "Part paid"
-                                              : "Unpaid"}
-                                        </span>
-                                        {r.outstanding_minor > 0 && (
-                                          <small>
-                                            {fmt(r.outstanding_minor, currency)}{" "}
-                                            owed
-                                          </small>
-                                        )}
-                                      </td>
-                                      <td>
-                                        <button
-                                          className="button"
-                                          onClick={() =>
-                                            navigate(
-                                              r.kind === "salary"
-                                                ? "Payroll"
-                                                : "Expenses",
-                                            )
-                                          }
-                                        >
-                                          View records
-                                        </button>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          ) : (
-                            <Empty title="Your workspace is ready">
-                              Record your first expense, or add an employee to
-                              start documenting salaries.
-                            </Empty>
-                          )}
-                        </section>
-                        <aside
-                          className="dashboard-sidebar"
-                          aria-label="Workspace shortcuts and outstanding payments"
-                        >
-                          <section className="panel dashboard-attention">
-                            <div className="dashboard-section-label">
-                              <Clock3 size={16} /> Payment overview
-                            </div>
-                            <h2>
-                              {data.record_summary?.owed_minor > 0
-                                ? "Payments to follow up"
-                                : "No outstanding payments"}
-                            </h2>
-                            <p>
-                              {data.record_summary?.owed_minor > 0
-                                ? "Amounts still owed on your recorded expenses and salaries."
-                                : "Your recorded expenses and salaries have no remaining balance."}
-                            </p>
-                            <button
-                              className="dashboard-balance-link"
-                              onClick={() => navigate("Expenses")}
-                            >
-                              <span>Expenses & bills</span>
-                              <strong>
-                                {fmt(
-                                  (data.record_summary?.owed_minor || 0) -
-                                    (data.record_summary?.salary_owed_minor ||
-                                      0),
-                                  currency,
-                                )}
-                              </strong>
-                              <ArrowRight size={16} />
-                            </button>
-                            <button
-                              className="dashboard-balance-link"
-                              onClick={() => navigate("Payroll")}
-                            >
-                              <span>Salaries</span>
-                              <strong>
-                                {fmt(
-                                  data.record_summary?.salary_owed_minor || 0,
-                                  currency,
-                                )}
-                              </strong>
-                              <ArrowRight size={16} />
-                            </button>
-                          </section>
-                          <section className="panel dashboard-shortcuts">
-                            <div className="dashboard-section-label">
-                              Quick access
-                            </div>
-                            {[
-                              {
-                                page: "Expenses",
-                                title: "Expenses & bills",
-                                note: "Record costs and payments",
-                                icon: <Receipt size={19} />,
-                              },
-                              {
-                                page: "Employees",
-                                title: "Employees",
-                                note: "Manage your team and salaries",
-                                icon: <Users size={19} />,
-                              },
-                              {
-                                page: "Payroll",
-                                title: "Payroll",
-                                note: "Record monthly salary payments",
-                                icon: <Wallet size={19} />,
-                              },
-                            ].map((item) => (
+                  {page === "Overview" &&
+                    entity === "ng" &&
+                    user &&
+                    ["finance", "cfo", "auditor"].includes(user.role) && (
+                      <ExecutiveOverview
+                        key={entity}
+                        entity={entity}
+                        request={api}
+                        navigate={navigate}
+                        onRecord={() => openRecord("new", "expense")}
+                      />
+                    )}
+                  {page === "Overview" &&
+                    data &&
+                    user &&
+                    (entity !== "ng" ||
+                      !["finance", "cfo", "auditor"].includes(user.role)) && (
+                      <>
+                        <div className="metrics simple-dashboard-metrics">
+                          <Metric
+                            label="Total recorded costs"
+                            value={fmt(data.spend_minor, currency)}
+                            icon={<Receipt size={19} />}
+                            note="Expenses and salaries · counted once"
+                          />
+                          <Metric
+                            label="Still owed"
+                            value={fmt(
+                              data.record_summary?.owed_minor || 0,
+                              currency,
+                            )}
+                            icon={<Wallet size={19} />}
+                            note="Documented expenses and salaries"
+                          />
+                          <Metric
+                            label="Salary payments due"
+                            value={fmt(
+                              data.record_summary?.salary_owed_minor || 0,
+                              currency,
+                            )}
+                            icon={<Users size={19} />}
+                            note="Included in the amount still owed"
+                          />
+                        </div>
+                        <div className="dashboard-records-layout">
+                          <section className="panel dashboard-records">
+                            <div className="panel-heading">
+                              <div>
+                                <h2>Recent records</h2>
+                                <p>
+                                  Latest expenses and salaries, with payment
+                                  status.
+                                </p>
+                              </div>
                               <button
-                                key={item.page}
-                                className="dashboard-shortcut"
-                                onClick={() => navigate(item.page)}
+                                className="text-button"
+                                onClick={() => navigate("Reports")}
                               >
-                                <span className="dashboard-shortcut-icon">
-                                  {item.icon}
-                                </span>
-                                <span>
-                                  <strong>{item.title}</strong>
-                                  <small>{item.note}</small>
-                                </span>
+                                View reports <ArrowRight size={16} />
+                              </button>
+                            </div>
+                            {data.documented_recent?.length ? (
+                              <div className="table-scroll">
+                                <table>
+                                  <thead>
+                                    <tr>
+                                      <th>Description</th>
+                                      <th>Payee</th>
+                                      <th>Cost</th>
+                                      <th>Status</th>
+                                      <th>
+                                        <span className="sr-only">Actions</span>
+                                      </th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {data.documented_recent.map((r: Row) => (
+                                      <tr key={r.id}>
+                                        <td>
+                                          {r.description}
+                                          <small>{r.date}</small>
+                                        </td>
+                                        <td>{r.payee}</td>
+                                        <td>{fmt(r.amount_minor, currency)}</td>
+                                        <td>
+                                          <span
+                                            className={`dashboard-record-status ${r.outstanding_minor === 0 ? "is-paid" : "is-due"}`}
+                                          >
+                                            {r.outstanding_minor === 0
+                                              ? "Paid"
+                                              : r.outstanding_minor <
+                                                  r.amount_minor
+                                                ? "Part paid"
+                                                : "Unpaid"}
+                                          </span>
+                                          {r.outstanding_minor > 0 && (
+                                            <small>
+                                              {fmt(
+                                                r.outstanding_minor,
+                                                currency,
+                                              )}{" "}
+                                              owed
+                                            </small>
+                                          )}
+                                        </td>
+                                        <td>
+                                          <button
+                                            className="button"
+                                            onClick={() =>
+                                              navigate(
+                                                r.kind === "salary"
+                                                  ? "Payroll"
+                                                  : "Expenses",
+                                              )
+                                            }
+                                          >
+                                            View records
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <Empty title="Your workspace is ready">
+                                Record your first expense, or add an employee to
+                                start documenting salaries.
+                              </Empty>
+                            )}
+                          </section>
+                          <aside
+                            className="dashboard-sidebar"
+                            aria-label="Workspace shortcuts and outstanding payments"
+                          >
+                            <section className="panel dashboard-attention">
+                              <div className="dashboard-section-label">
+                                <Clock3 size={16} /> Payment overview
+                              </div>
+                              <h2>
+                                {data.record_summary?.owed_minor > 0
+                                  ? "Payments to follow up"
+                                  : "No outstanding payments"}
+                              </h2>
+                              <p>
+                                {data.record_summary?.owed_minor > 0
+                                  ? "Amounts still owed on your recorded expenses and salaries."
+                                  : "Your recorded expenses and salaries have no remaining balance."}
+                              </p>
+                              <button
+                                className="dashboard-balance-link"
+                                onClick={() => navigate("Expenses")}
+                              >
+                                <span>Expenses & bills</span>
+                                <strong>
+                                  {fmt(
+                                    (data.record_summary?.owed_minor || 0) -
+                                      (data.record_summary?.salary_owed_minor ||
+                                        0),
+                                    currency,
+                                  )}
+                                </strong>
                                 <ArrowRight size={16} />
                               </button>
-                            ))}
+                              <button
+                                className="dashboard-balance-link"
+                                onClick={() => navigate("Payroll")}
+                              >
+                                <span>Salaries</span>
+                                <strong>
+                                  {fmt(
+                                    data.record_summary?.salary_owed_minor || 0,
+                                    currency,
+                                  )}
+                                </strong>
+                                <ArrowRight size={16} />
+                              </button>
+                            </section>
+                            <section className="panel dashboard-shortcuts">
+                              <div className="dashboard-section-label">
+                                Quick access
+                              </div>
+                              {[
+                                {
+                                  page: "Expenses",
+                                  title: "Expenses & bills",
+                                  note: "Record costs and payments",
+                                  icon: <Receipt size={19} />,
+                                },
+                                {
+                                  page: "Employees",
+                                  title: "Employees",
+                                  note: "Manage your team and salaries",
+                                  icon: <Users size={19} />,
+                                },
+                                {
+                                  page: "Payroll",
+                                  title: "Payroll",
+                                  note: "Record monthly salary payments",
+                                  icon: <Wallet size={19} />,
+                                },
+                              ].map((item) => (
+                                <button
+                                  key={item.page}
+                                  className="dashboard-shortcut"
+                                  onClick={() => navigate(item.page)}
+                                >
+                                  <span className="dashboard-shortcut-icon">
+                                    {item.icon}
+                                  </span>
+                                  <span>
+                                    <strong>{item.title}</strong>
+                                    <small>{item.note}</small>
+                                  </span>
+                                  <ArrowRight size={16} />
+                                </button>
+                              ))}
+                            </section>
+                          </aside>
+                        </div>
+                        {spends.length > 0 && (
+                          <section className="panel">
+                            <div className="panel-heading">
+                              <h2>Approval workflow records</h2>
+                              <button
+                                className="button"
+                                onClick={() => {
+                                  navigate("Spend");
+                                }}
+                              >
+                                View approval requests
+                              </button>
+                            </div>
+                            <SpendTable rows={data.recent} short />
                           </section>
-                        </aside>
-                      </div>
-                      {spends.length > 0 && (
-                        <section className="panel">
-                          <div className="panel-heading">
-                            <h2>Approval workflow records</h2>
-                            <button
-                              className="button"
-                              onClick={() => {
-                                navigate("Spend");
-                              }}
-                            >
-                              View approval requests
-                            </button>
-                          </div>
-                          <SpendTable rows={data.recent} short />
-                        </section>
-                      )}
-                    </>
-                  )}
+                        )}
+                      </>
+                    )}
                   {["Spend", "Approvals", "Payments"].includes(page) && (
                     <section className="panel finance-workspace spend-workspace">
                       <div className="panel-heading">

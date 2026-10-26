@@ -41,6 +41,7 @@ export default function Budgets({
     [error, setError] = useState(""),
     [message, setMessage] = useState(""),
     [archived, setArchived] = useState(false),
+    [samples, setSamples] = useState(false),
     [from, setFrom] = useState(""),
     [to, setTo] = useState(""),
     [editor, setEditor] = useState<Row | null>(null),
@@ -107,6 +108,7 @@ export default function Budgets({
   const filtered = rows.filter(
     (r) =>
       (archived || !r.archived) &&
+      (samples || !r.sample_only) &&
       (!from || r.period >= from) &&
       (!to || r.period <= to),
   );
@@ -196,6 +198,14 @@ export default function Budgets({
               onChange={(e) => setArchived(e.target.checked)}
             />
             Show archived budgets
+          </label>
+          <label className="fm-check">
+            <input
+              type="checkbox"
+              checked={samples}
+              onChange={(e) => setSamples(e.target.checked)}
+            />{" "}
+            Show legacy sample budgets
           </label>
         </div>
       </section>
@@ -370,7 +380,13 @@ export default function Budgets({
                   ].map((k) => (
                     <td key={k}>{money(r[k])}</td>
                   ))}
-                  <td>{r.archived ? "Archived" : "Active"}</td>
+                  <td>
+                    {r.sample_only
+                      ? "Sample · excluded from management"
+                      : r.archived
+                        ? "Archived"
+                        : "Active"}
+                  </td>
                   <td>
                     <div className="action-buttons">
                       <button
