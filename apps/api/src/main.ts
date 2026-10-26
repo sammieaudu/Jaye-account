@@ -1,4 +1,5 @@
 import { exportInvestorWorkbook } from "./financial/investor-workbook";
+import { MonthlyExpenseService } from "./monthly-expenses";
 import { InvoiceService } from "./invoices";
 import { hostedMode, validateHosting, validServiceKey } from "./hosted";
 import { BookkeepingService } from "./bookkeeping";
@@ -295,6 +296,138 @@ class Api {
       return this.store.actor("finance");
     }
     return this.store.session(token(req));
+  }
+  @Get("expenses/monthly") monthlyExpenses(
+    @Req() req: Request,
+    @Query() q: any,
+  ) {
+    return new MonthlyExpenseService(this.store).report(
+      this.financialActor(req),
+      q.entity,
+      q.from,
+      q.to,
+      q.category || "",
+      q.department || "",
+    );
+  }
+  @Get("expenses/monthly.xlsx") async monthlyExpenseExport(
+    @Req() req: Request,
+    @Query() q: any,
+    @Res() res: Response,
+  ) {
+    const buffer = await new MonthlyExpenseService(this.store).workbook(
+      this.financialActor(req),
+      q.entity,
+      q.from,
+      q.to,
+      q.category || "",
+      q.department || "",
+    );
+    res
+      .set({
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition":
+          'attachment; filename="jaye-monthly-expenses.xlsx"',
+      })
+      .send(Buffer.from(buffer));
+  }
+  @Get("expenses/imports") expenseImports(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+  ) {
+    return new MonthlyExpenseService(this.store).rows(
+      this.financialActor(req),
+      entity,
+    );
+  }
+  @Get("expenses/imports/source/:id") expenseImportSource(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Param("id") id: string,
+    @Res() res: Response,
+  ) {
+    const data = new MonthlyExpenseService(this.store).source(
+      this.financialActor(req),
+      entity,
+      id,
+    );
+    res
+      .set(
+        "Content-Disposition",
+        'attachment; filename="expense-import-source.json"',
+      )
+      .json(data);
+  }
+  @Post("expenses/imports/preview")
+  @UseInterceptors(
+    FileInterceptor("file", { limits: { fileSize: 8 * 1024 * 1024 } }),
+  )
+  async expenseImportPreview(
+    @Req() req: Request,
+    @Query() q: any,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new DomainError("Choose an XLSX file");
+    const result = await new MonthlyExpenseService(this.store).preview(
+      this.financialActor(req),
+      q.entity,
+      file.buffer,
+      file.originalname,
+      Number(q.year),
+    );
+    return { ...result, source: undefined };
+  }
+  @Post("expenses/imports/stage")
+  @UseInterceptors(
+    FileInterceptor("file", { limits: { fileSize: 8 * 1024 * 1024 } }),
+  )
+  async expenseImportStage(
+    @Req() req: Request,
+    @Query() q: any,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new DomainError("Choose an XLSX file");
+    return new MonthlyExpenseService(this.store).stage(
+      this.financialActor(req),
+      q.entity,
+      file.buffer,
+      file.originalname,
+      Number(q.year),
+    );
+  }
+  @Post("expenses/imports/budgets") applyExpenseBudgets(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+  ) {
+    return new MonthlyExpenseService(this.store).applyBudgets(
+      this.financialActor(req),
+      entity,
+    );
+  }
+  @Post("expenses/imports/:id/review") reviewExpenseImport(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Param("id") id: string,
+    @Body() input: any,
+  ) {
+    return new MonthlyExpenseService(this.store).review(
+      this.financialActor(req),
+      entity,
+      id,
+      input,
+    );
+  }
+  @Post("expenses/monthly/review") reviewExpenseMonth(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Body() input: any,
+  ) {
+    return new MonthlyExpenseService(this.store).close(
+      this.financialActor(req),
+      entity,
+      input,
+    );
   }
   @Get("health") health() {
     return {

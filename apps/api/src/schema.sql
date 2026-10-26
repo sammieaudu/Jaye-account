@@ -154,3 +154,7 @@ CREATE TRIGGER IF NOT EXISTS budget_history_no_delete BEFORE DELETE ON budget_hi
 CREATE TABLE IF NOT EXISTS fm_report_submissions(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL,name TEXT NOT NULL,snapshot_id TEXT NOT NULL,data TEXT NOT NULL,created_at TEXT NOT NULL,actor_id TEXT NOT NULL,status TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS fm_report_submission_immutable BEFORE UPDATE ON fm_report_submissions BEGIN SELECT RAISE(ABORT,'Report submissions are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS fm_report_submission_no_delete BEFORE DELETE ON fm_report_submissions BEGIN SELECT RAISE(ABORT,'Report submissions are immutable'); END;
+-- Workbook sources are retained separately from posted accounting entries.
+CREATE TABLE IF NOT EXISTS expense_import_batches(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL REFERENCES entities(id),filename TEXT NOT NULL,file_hash TEXT NOT NULL,source_json TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(entity_id,file_hash));
+CREATE TABLE IF NOT EXISTS expense_import_rows(id TEXT PRIMARY KEY,batch_id TEXT NOT NULL REFERENCES expense_import_batches(id),entity_id TEXT NOT NULL,source_key TEXT NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'review',target_id TEXT,revision INTEGER NOT NULL DEFAULT 0,UNIQUE(entity_id,source_key));
+CREATE TABLE IF NOT EXISTS expense_month_reviews(entity_id TEXT NOT NULL,period TEXT NOT NULL,status TEXT NOT NULL,note TEXT NOT NULL,actor_id TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(entity_id,period));

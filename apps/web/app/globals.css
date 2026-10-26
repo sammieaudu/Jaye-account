@@ -3033,3 +3033,109 @@ code {
   .financial-model.budgets-workspace .panel-heading > div:first-child { flex: 0 1 auto; min-width: 0; }
   .financial-model.budgets-workspace .panel-heading .action-buttons { width: 100%; }
 }
+
+
+.monthly-expense-review {
+  margin-bottom: 24px;
+}
+.monthly-expense-review .section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.monthly-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 16px 0;
+}
+.monthly-toolbar label,
+.monthly-editor-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.monthly-toolbar input,
+.monthly-toolbar select,
+.monthly-editor-grid input,
+.monthly-editor-grid select,
+.monthly-editor-grid textarea {
+  padding: 9px 12px;
+  border: 1px solid var(--border, #dce3df);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: inherit;
+  max-width: 100%;
+}
+.monthly-toolbar input[type="checkbox"] {
+  align-self: flex-start;
+}
+.monthly-toolbar button,
+.monthly-toolbar .button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.monthly-toolbar button[aria-pressed="true"] {
+  background: #163d35;
+  color: white;
+}
+.monthly-metrics {
+  flex-wrap: wrap;
+}
+.monthly-table {
+  overflow-x: auto;
+  margin: 18px 0;
+}
+.monthly-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.monthly-table caption {
+  text-align: left;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.monthly-table th,
+.monthly-table td {
+  text-align: left;
+  padding: 12px;
+  border-bottom: 1px solid var(--border, #e6ebe7);
+  vertical-align: top;
+}
+.monthly-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+.monthly-expense-review details {
+  margin: 16px 0;
+}
+.monthly-expense-review summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.monthly-import-editor {
+  margin-top: 20px;
+}
+@media (max-width: 700px) {
+  .monthly-toolbar {
+    align-items: stretch;
+  }
+  .monthly-toolbar label {
+    flex: 1 1 140px;
+  }
+  .monthly-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.monthly-expense-review { padding: 24px; }
+.monthly-expense-review .section-heading h2 { font-size: 18px; margin-bottom: 6px; }
+.monthly-expense-review .section-heading p { color: var(--muted, #6b7280); }
+@media (max-width: 700px) { .monthly-expense-review { padding: 16px; } }

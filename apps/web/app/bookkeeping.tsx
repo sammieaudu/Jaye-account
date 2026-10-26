@@ -9,6 +9,7 @@ import {
   Wallet,
 } from "lucide-react";
 import Select from "./select";
+import MonthlyExpenses from "./monthly-expenses";
 import CategorySelect from "./category-select";
 import ReceiptCapture from "./receipt-capture";
 import Correction from "./correction";
@@ -425,6 +426,21 @@ export default function Bookkeeping({
       )}
       {!detail && !form && (
         <>
+          {!team && !payroll && (
+            <MonthlyExpenses
+              entity={entity}
+              currency={currency}
+              request={request}
+              canWrite={canWrite}
+              onOpen={open}
+              onCreate={() => start()}
+              onChanged={reload}
+              revision={JSON.stringify(
+                records.map((r) => [r.id, r.revision, r.paid_minor]),
+              )}
+              navigate={navigate}
+            />
+          )}
           <div className="simple-guide">
             <div>
               {team ? (
