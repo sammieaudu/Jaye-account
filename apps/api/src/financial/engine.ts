@@ -46,6 +46,7 @@ export type Input = {
   invoiceReceipts: any[];
   vendorCosts?: any[];
   obligations?: any[];
+  budgets?: any[];
   captured_at: string;
 };
 const expenseAccounts: Account[] = [
@@ -119,6 +120,7 @@ export function calculate(
 ) {
   const active = input.resources.filter((r) => !r.archived);
   const config = active.find((r) => r.kind === "config")!.data;
+  const evidence = completenessFrom(active, config);
   const start = config.start_date,
     end = config.end_date ?? addDays(start, 89),
     cutoff = config.cutoff < end ? config.cutoff : end;
@@ -173,8 +175,7 @@ export function calculate(
     );
   if (
     cutoff >= start &&
-    (!config.operating_data_complete_through ||
-      config.operating_data_complete_through < cutoff)
+    (!evidence.complete_through || evidence.complete_through < cutoff)
   )
     warnings.push(
       "Operational actuals are incomplete through the cutoff. Missing activity is not zero performance.",
@@ -873,7 +874,7 @@ export function calculate(
     );
   let plannedTotal = total(
     funding
-      .filter((r) => r.data.status === "planned")
+      .filter((r) => r.data.status !== "confirmed")
       .map((r) => r.data.amount_minor),
   );
   for (const r of funding) {
@@ -897,7 +898,7 @@ export function calculate(
         );
       continue;
     }
-    if (f.status === "planned" && f.date <= cutoff) {
+    if (f.status !== "confirmed" && f.date <= cutoff) {
       warnings.push(
         `${f.name}: planned funding date has passed; confirm receipt or reschedule.`,
       );
@@ -907,7 +908,7 @@ export function calculate(
       f.date,
       "cash",
       f.kind,
-      f.status === "planned" && fundingOverride !== undefined && plannedTotal
+      f.status !== "confirmed" && fundingOverride !== undefined && plannedTotal
         ? Math.round((f.amount_minor * fundingOverride) / plannedTotal)
         : f.amount_minor,
       r.id,
@@ -1061,7 +1062,7 @@ export function calculate(
       "financing_cash",
     ].map((k) => [k, total(daily.map((d) => d[k]))]),
   );
-  const minCash = Math.min(...daily.map((d) => d.cash));
+  const minCash = Math.min(opening.cash, ...daily.map((d) => d.cash));
   const campaignAttribution = events
     .filter((e) => e.type === "campaign" && e.date >= start && e.date <= cutoff)
     .reduce((n, e) => n + e.amount_minor, 0);
@@ -1113,7 +1114,9 @@ export function calculate(
         metrics: pmf(
           events.filter((e) => e.service_id === service.id),
           cutoff,
-          config.operating_data_complete_through,
+          evidence.complete_through,
+          start,
+          evidence.basis,
         ),
       };
     });
@@ -1140,7 +1143,10 @@ export function calculate(
       minimum_cash: minCash,
       funding_gap: Math.max(0, config.minimum_cash_minor - minCash),
       first_shortfall:
-        daily.find((d) => d.cash < config.minimum_cash_minor)?.date || null,
+        (opening.cash < config.minimum_cash_minor
+          ? start
+          : daily.find((d) => d.cash < config.minimum_cash_minor)?.date) ||
+        null,
       balance_check: statements(balances).balance_check,
     },
     checkpoints: [...new Set([30, 60, 90, daily.length])]
@@ -1148,17 +1154,48 @@ export function calculate(
       .sort((a, b) => a - b)
       .map((n) => ({ day: n, ...daily[n - 1] })),
     closing: balances,
-    pmf: pmf(events, cutoff, config.operating_data_complete_through),
+    pmf: pmf(events, cutoff, evidence.complete_through, start, evidence.basis),
     services: serviceResults,
     pending: input.pending,
     invoice_receipts: unmatchedReceipts,
   };
 }
 
+export type CompletenessBasis = "configured" | "source_coverage" | "unset";
+// Completeness date: configured value first, otherwise the earliest coverage
+// date across active operational sources. Cohort, renewal and growth metrics
+// are only measurable through this date.
+export function completenessFrom(active: Resource[], config: any) {
+  if (config.operating_data_complete_through)
+    return {
+      complete_through: config.operating_data_complete_through as string,
+      basis: "configured" as CompletenessBasis,
+    };
+  const coverage = active
+    .filter((r) => r.kind === "source" && r.data.coverage_through)
+    .map((r) => r.data.coverage_through as string)
+    .sort()[0];
+  return coverage
+    ? {
+        complete_through: coverage,
+        basis: "source_coverage" as CompletenessBasis,
+      }
+    : { complete_through: null, basis: "unset" as CompletenessBasis };
+}
+export const rateMetrics = [
+  "customer_d30",
+  "driver_renewal",
+  "fulfilment",
+  "contribution_margin",
+  "driver_d30_active",
+  "paying_driver_growth_weekly",
+];
 export function pmf(
   events: Event[],
   cutoff: string,
   completeThrough: string | null,
+  start = cutoff,
+  basis: CompletenessBasis = completeThrough ? "configured" : "unset",
 ) {
   const observed = events.filter(
     (e) => e.date <= cutoff && e.status !== "void",
@@ -1166,33 +1203,36 @@ export function pmf(
   const bookings = observed.filter((e) => e.type === "booking"),
     completed = bookings.filter((e) => e.status === "completed");
   const ratio = (n: number, d: number) => (d ? n / d : null);
+  const mean = (xs: number[]) => (xs.length ? total(xs) / xs.length : null);
+  const median = (xs: number[]) => {
+    if (!xs.length) return null;
+    const s = [...xs].sort((a, b) => a - b),
+      m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
   const customers = [...new Set(completed.map((e) => e.customer_id))];
-  const cohorts = [...new Set(completed.map((e) => e.date.slice(0, 7)))].map(
-    (month) => {
+  const firstCompletion = (id: string) =>
+    completed
+      .filter((e) => e.customer_id === id)
+      .map((e) => e.date)
+      .sort()[0];
+  const mature = (d: string, n: number) =>
+    addDays(d, n) <= cutoff &&
+    !!completeThrough &&
+    addDays(d, n) <= completeThrough;
+  const cohorts = [...new Set(completed.map((e) => e.date.slice(0, 7)))]
+    .sort()
+    .map((month) => {
       const members = customers.filter((id) =>
-        completed
-          .filter((e) => e.customer_id === id)
-          .sort((a, b) => a.date.localeCompare(b.date))[0]
-          ?.date.startsWith(month),
+        firstCompletion(id)?.startsWith(month),
       );
       const metrics = Object.fromEntries(
         [7, 30, 60].map((n) => {
-          const eligible = members.filter((id) => {
-            const first = completed
-              .filter((e) => e.customer_id === id)
-              .map((e) => e.date)
-              .sort()[0];
-            return (
-              addDays(first, n) <= cutoff &&
-              !!completeThrough &&
-              addDays(first, n) <= completeThrough
-            );
-          });
+          const eligible = members.filter((id) =>
+            mature(firstCompletion(id), n),
+          );
           const retained = eligible.filter((id) => {
-            const first = completed
-              .filter((e) => e.customer_id === id)
-              .map((e) => e.date)
-              .sort()[0];
+            const first = firstCompletion(id);
             return completed.some(
               (e) =>
                 e.customer_id === id &&
@@ -1212,8 +1252,7 @@ export function pmf(
         }),
       );
       return { month, sample: members.length, ...metrics };
-    },
-  );
+    });
   const subs = observed.filter((e) => e.type === "subscription");
   const eligible = subs.filter(
     (e) =>
@@ -1238,39 +1277,43 @@ export function pmf(
   const registrations = observed.filter(
     (e) => e.type === "driver" || e.type === "customer",
   );
+  const personId = (e: Event) =>
+    e.type === "driver" ? e.driver_id : e.customer_id;
+  const firstRegistration = new Map<string, string>();
+  for (const e of registrations) {
+    const key = `${e.type}:${personId(e)}`;
+    const cur = firstRegistration.get(key);
+    if (!cur || e.date < cur) firstRegistration.set(key, e.date);
+  }
   const newPeople = (audience: string) => [
     ...new Set(
-      registrations
-        .filter((e) => e.type === audience)
-        .map((e) => (audience === "driver" ? e.driver_id : e.customer_id)),
+      registrations.filter((e) => e.type === audience).map(personId),
     ),
   ];
+  const campaigns = observed.filter((e) => e.type === "campaign");
+  const attributedIds = (a: string) =>
+    new Set(
+      registrations
+        .filter(
+          (e) =>
+            e.type === a &&
+            e.campaign_id &&
+            campaigns.some(
+              (c) =>
+                (e.campaign_id === `${c.source_id}:${c.external_id}` ||
+                  (c.external_id === e.campaign_id &&
+                    c.source_id === e.source_id)) &&
+                c.audience === a,
+            ),
+        )
+        .map(personId),
+    );
   const acquisition = Object.fromEntries(
     ["driver", "customer"].map((a) => {
       const spend = total(
-        observed
-          .filter((e) => e.type === "campaign" && e.audience === a)
-          .map((e) => e.amount_minor),
+        campaigns.filter((e) => e.audience === a).map((e) => e.amount_minor),
       );
-      const acquired = [
-        ...new Set(
-          registrations
-            .filter(
-              (e) =>
-                e.type === a &&
-                e.campaign_id &&
-                observed.some(
-                  (c) =>
-                    c.type === "campaign" &&
-                    (e.campaign_id === `${c.source_id}:${c.external_id}` ||
-                      (c.external_id === e.campaign_id &&
-                        c.source_id === e.source_id)) &&
-                    c.audience === a,
-                ),
-            )
-            .map((e) => (a === "driver" ? e.driver_id : e.customer_id)),
-        ),
-      ].length;
+      const acquired = attributedIds(a).size;
       return [
         a,
         {
@@ -1281,6 +1324,35 @@ export function pmf(
       ];
     }),
   );
+  const net = (e: Event) =>
+    e.amount_minor -
+    total(
+      observed
+        .filter(
+          (x) =>
+            x.type === "refund" &&
+            x.source_id === e.source_id &&
+            x.related_id === e.external_id,
+        )
+        .map((x) => x.amount_minor),
+    );
+  const commissionOf = (e: Event) =>
+    e.price_snapshot?.mode === "percent"
+      ? Math.round(net(e) * e.price_snapshot.rate)
+      : e.price_snapshot?.mode === "fixed"
+        ? Math.round(
+            (e.price_snapshot.amount_minor || 0) *
+              (e.amount_minor ? net(e) / e.amount_minor : 0),
+          )
+        : 0;
+  // Paid coverage is [date, coverage_end) with an exclusive end.
+  const overlapDays = (e: Event, from: string, to: string) => {
+    const a = e.date > from ? e.date : from;
+    const last = addDays(e.coverage_end!, -1);
+    const b = last < to ? last : to;
+    return b >= a ? days(a, b) + 1 : 0;
+  };
+  const payingIds = new Set(subs.map((e) => e.driver_id));
   const driverEconomics = [
     ...new Set([
       ...drivers,
@@ -1290,40 +1362,10 @@ export function pmf(
   ].map((id) => {
     const jobs = completed.filter((e) => e.driver_id === id),
       plans = subs.filter((e) => e.driver_id === id);
-    const net = (e: Event) =>
-      e.amount_minor -
-      total(
-        observed
-          .filter(
-            (x) =>
-              x.type === "refund" &&
-              x.source_id === e.source_id &&
-              x.related_id === e.external_id,
-          )
-          .map((x) => x.amount_minor),
-      );
     const gross = total(jobs.map(net));
-    const commission = total(
-      jobs.map((e) =>
-        e.price_snapshot?.mode === "percent"
-          ? Math.round(net(e) * e.price_snapshot.rate)
-          : e.price_snapshot?.mode === "fixed"
-            ? Math.round(
-                (e.price_snapshot.amount_minor || 0) *
-                  (e.amount_minor ? net(e) / e.amount_minor : 0),
-              )
-            : 0,
-      ),
-    );
+    const commission = total(jobs.map(commissionOf));
     const subscriptionCost = total(plans.map(net));
-    const coverage = total(
-      plans.map((e) =>
-        Math.max(
-          0,
-          days(e.date, [e.coverage_end!, addDays(cutoff, 1)].sort()[0]),
-        ),
-      ),
-    );
+    const coverage = total(plans.map((e) => overlapDays(e, e.date, cutoff)));
     return {
       driver_id: id,
       jobs: jobs.length,
@@ -1333,23 +1375,231 @@ export function pmf(
       earnings_before_vehicle_costs: gross - commission - subscriptionCost,
       subscription_burden: ratio(subscriptionCost, gross - commission),
       coverage_days: coverage,
+      jobs_per_covered_day: ratio(jobs.length, coverage),
+      active_days: new Set(jobs.map((e) => e.date)).size,
     };
   });
   const firstTimes = customers
     .map((id) => {
-      const reg = registrations
-          .filter((e) => e.type === "customer" && e.customer_id === id)
-          .map((e) => e.date)
-          .sort()[0],
-        first = completed
-          .filter((e) => e.customer_id === id)
-          .map((e) => e.date)
-          .sort()[0];
+      const reg = firstRegistration.get(`customer:${id}`),
+        first = firstCompletion(id);
       return reg ? days(reg, first) : null;
     })
     .filter((n): n is number => n !== null && n >= 0);
-  const extra = {
+  // Weekly momentum: week 1 starts on the period start; only observed weeks.
+  const weekly: any[] = [];
+  if (cutoff >= start) {
+    const weeks = Math.floor(days(start, cutoff) / 7) + 1;
+    let previous: number | null = null;
+    for (let w = 1; w <= weeks; w++) {
+      const from = addDays(start, (w - 1) * 7),
+        end = addDays(from, 6),
+        to = end < cutoff ? end : cutoff;
+      const inWeek = (e: Event) => e.date >= from && e.date <= to;
+      const jobs = completed.filter(inWeek);
+      const paying = new Set(
+        subs
+          .filter((e) => e.date <= to && e.coverage_end! > from)
+          .map((e) => e.driver_id),
+      );
+      const activeDrivers = new Set(jobs.map((e) => e.driver_id));
+      const payingDriverDays = total(
+        subs.map((e) => overlapDays(e, from, to)),
+      );
+      const requested = bookings.filter(inWeek).length;
+      weekly.push({
+        week: w,
+        from,
+        to,
+        complete: !!completeThrough && to <= completeThrough,
+        new_drivers: new Set(
+          registrations
+            .filter((e) => e.type === "driver" && inWeek(e))
+            .map(personId),
+        ).size,
+        new_customers: new Set(
+          registrations
+            .filter((e) => e.type === "customer" && inWeek(e))
+            .map(personId),
+        ).size,
+        paying_drivers: paying.size,
+        paying_driver_growth:
+          previous === null ? null : ratio(paying.size - previous, previous),
+        active_drivers: activeDrivers.size,
+        active_paying_share: ratio(
+          [...activeDrivers].filter((id) => paying.has(id)).length,
+          paying.size,
+        ),
+        completed_jobs: jobs.length,
+        requested_bookings: requested,
+        fulfilment: ratio(jobs.length, requested),
+        customers_transacting: new Set(jobs.map((e) => e.customer_id)).size,
+        gross_bookings: total(jobs.map(net)),
+        subscription_purchases: total(subs.filter(inWeek).map(net)),
+        campaign_spend: total(
+          campaigns.filter(inWeek).map((e) => e.amount_minor),
+        ),
+        paying_driver_days: payingDriverDays,
+        completed_jobs_by_paying: jobs.filter((e) => paying.has(e.driver_id))
+          .length,
+        jobs_per_paying_driver_day: ratio(
+          jobs.filter((e) => paying.has(e.driver_id)).length,
+          payingDriverDays,
+        ),
+      });
+      previous = paying.size;
+    }
+  }
+  const growthWeeks = weekly
+    .filter((w) => w.complete && w.paying_driver_growth !== null)
+    .slice(-4);
+  // Driver cohorts by first registration month: paid conversion and whether the
+  // driver was still active (job completed or paid coverage) around D30/D60.
+  const driverRegistered = [...firstRegistration]
+    .filter(([k]) => k.startsWith("driver:"))
+    .map(([k, d]) => ({ id: k.slice(7), date: d }));
+  const driverCohorts = [
+    ...new Set(driverRegistered.map((d) => d.date.slice(0, 7))),
+  ]
+    .sort()
+    .map((month) => {
+      const members = driverRegistered.filter((d) =>
+        d.date.startsWith(month),
+      );
+      const paid = members.filter((m) => payingIds.has(m.id)).length;
+      const window = (n: number) => {
+        const eligibleMembers = members.filter((m) => mature(m.date, n));
+        const active = eligibleMembers.filter((m) => {
+          const from = addDays(m.date, n - 6),
+            to = addDays(m.date, n);
+          return (
+            completed.some(
+              (e) => e.driver_id === m.id && e.date >= from && e.date <= to,
+            ) ||
+            subs.some(
+              (e) =>
+                e.driver_id === m.id &&
+                e.date <= to &&
+                e.coverage_end! > from,
+            )
+          );
+        });
+        return {
+          eligible: eligibleMembers.length,
+          active: active.length,
+          rate: ratio(active.length, eligibleMembers.length),
+        };
+      };
+      return {
+        month,
+        registered: members.length,
+        paid,
+        paid_rate: ratio(paid, members.length),
+        d30: window(30),
+        d60: window(60),
+      };
+    });
+  const byStatus = (s: string) =>
+    bookings.filter((e) => e.status === s).length;
+  const reachedAcceptance =
+    byStatus("accepted") + byStatus("completed") + byStatus("paid");
+  const matchMinutes = completed
+    .filter((e) => e.match_minutes !== null)
+    .map((e) => e.match_minutes!);
+  const funnel = {
+    bookings: bookings.length,
+    still_requested: byStatus("requested"),
+    accepted_not_completed: byStatus("accepted"),
+    completed: completed.length,
+    cancelled: byStatus("cancelled"),
+    acceptance_rate: ratio(reachedAcceptance, bookings.length),
+    completion_rate: ratio(completed.length, bookings.length),
+    median_match_minutes: median(matchMinutes),
+    matched_sample: matchMinutes.length,
+  };
+  const payingDriverDays = total(driverEconomics.map((d) => d.coverage_days));
+  const activeDriverDays = new Set(
+    completed.map((e) => `${e.driver_id}|${e.date}`),
+  ).size;
+  const jobsByPaying = completed.filter((e) =>
+    payingIds.has(e.driver_id),
+  ).length;
+  const utilisation = {
+    paying_driver_days: payingDriverDays,
+    jobs_by_paying_drivers: jobsByPaying,
+    jobs_per_paying_driver_day: ratio(jobsByPaying, payingDriverDays),
+    active_driver_days: activeDriverDays,
+    jobs_per_active_driver_day: ratio(completed.length, activeDriverDays),
+    average_job_hours: mean(
+      completed.filter((e) => e.job_hours !== null).map((e) => e.job_hours!),
+    ),
+    average_available_hours: mean(
+      observed
+        .filter((e) => e.type === "driver" && e.available_hours !== null)
+        .map((e) => e.available_hours!),
+    ),
+    subscription_burden_median: median(
+      driverEconomics
+        .filter(
+          (d) =>
+            d.subscription_cost > 0 && d.gross_bookings - d.commission > 0,
+        )
+        .map((d) => d.subscription_burden!),
+    ),
+    paying_drivers_without_jobs: driverEconomics.filter(
+      (d) => d.subscription_cost > 0 && d.jobs === 0,
+    ).length,
+  };
+  // Early payback: CAC against observed platform revenue per attributed
+  // acquisition, scaled to a month. Labelled immature below 90 observed days;
+  // it is a direction signal, not a mature LTV.
+  const payback = Object.fromEntries(
+    ["driver", "customer"].map((a) => {
+      const ids = attributedIds(a);
+      const revenue =
+        a === "driver"
+          ? total(subs.filter((e) => ids.has(e.driver_id)).map(net)) +
+            total(
+              completed.filter((e) => ids.has(e.driver_id)).map(commissionOf),
+            )
+          : total(
+              completed
+                .filter((e) => ids.has(e.customer_id))
+                .map(commissionOf),
+            );
+      const observedDays = total(
+        [...ids].map(
+          (id) => days(firstRegistration.get(`${a}:${id}`)!, cutoff) + 1,
+        ),
+      );
+      const monthly = ratio(revenue * 30.4, observedDays);
+      const cac = acquisition[a].cac;
+      const months =
+        cac !== null && monthly !== null && monthly > 0 ? cac / monthly : null;
+      const averageDays = ratio(observedDays, ids.size);
+      return [
+        a,
+        {
+          attributed: ids.size,
+          observed_revenue: revenue,
+          average_observed_days: averageDays,
+          monthly_revenue_per_acquisition: monthly,
+          payback_months: months,
+          maturity:
+            months === null
+              ? "unavailable"
+              : averageDays !== null && averageDays < 90
+                ? "immature"
+                : "observed",
+        },
+      ];
+    }),
+  );
+  return {
+    complete_through: completeThrough,
+    complete_through_basis: basis,
     acquisition,
+    payback,
     driver_economics: driverEconomics,
     activation: {
       customers: ratio(customers.length, newPeople("customer").length),
@@ -1357,34 +1607,49 @@ export function pmf(
         new Set(completed.map((e) => e.driver_id)).size,
         drivers.length,
       ),
-      paid_conversion: ratio(
-        new Set(subs.map((e) => e.driver_id)).size,
-        drivers.length,
-      ),
+      paid_conversion: ratio(payingIds.size, drivers.length),
     },
     booking_frequency: ratio(completed.length, customers.length),
-    time_to_first_completion_days: firstTimes.length
-      ? total(firstTimes) / firstTimes.length
-      : null,
-    observed_payback: null,
-  };
-  return {
-    ...extra,
+    time_to_first_completion_days: mean(firstTimes),
+    weekly,
+    growth: {
+      weeks_used: growthWeeks.length,
+      paying_driver_growth_weekly: mean(
+        growthWeeks.map((w) => w.paying_driver_growth as number),
+      ),
+      latest_paying_drivers: weekly.at(-1)?.paying_drivers ?? 0,
+      latest_week: weekly.at(-1)?.week ?? null,
+    },
+    driver_cohorts: driverCohorts,
+    funnel,
+    utilisation,
     definitions: {
       retention:
         "Completed job in trailing 7-day window ending D7/D30/D60 after first completion, excluding first job. Only cohorts with complete observation coverage are eligible.",
+      driver_cohorts:
+        "Drivers grouped by first registration month. Paid = any subscription purchase by cutoff. D30/D60 active = completed a job or held paid coverage in the trailing 7-day window ending D30/D60 after registration; complete coverage required.",
       renewal:
         "Non-daily subscription followed by coverage starting on exclusive expiry date; observed complete periods only.",
+      weekly:
+        "Week 1 starts on the period start date. Paying drivers hold paid coverage on at least one day of the week. Growth compares paying drivers with the prior week; the scorecard averages the last four complete weeks.",
+      utilisation:
+        "Jobs per paying driver-day = completed jobs by subscribed drivers / days of paid coverage through cutoff. Subscription burden = subscription cost / (gross bookings - platform commission), median across paying drivers with earnings.",
+      funnel:
+        "Each booking record carries its latest status. Acceptance = accepted, completed or paid / all non-void bookings. Match minutes are reported where the source supplies them.",
       fulfilment:
         "Completed bookings / all non-void booking records; latest source revision only.",
       repeat:
         "Customers with at least two completed bookings / customers with a completed booking.",
       cac: "Campaign spend / newly registered attributed population; unavailable without attribution.",
+      payback:
+        "CAC / monthly platform revenue per attributed acquisition (subscriptions net of refunds plus commission for drivers; commission for customers), using observed days through cutoff. Immature below 90 average observed days. Not a mature LTV.",
+      completeness:
+        "Metrics that need a full observation window use the completeness date: the configured value, otherwise the earliest coverage date of active operational sources.",
     },
     cohorts,
     customers: customers.length,
     drivers: drivers.length,
-    paying_drivers: new Set(subs.map((e) => e.driver_id)).size,
+    paying_drivers: payingIds.size,
     completed_jobs: completed.length,
     fulfilment: ratio(completed.length, bookings.length),
     cancellation: ratio(
@@ -1402,18 +1667,14 @@ export function pmf(
       renewed: renewed.length,
       rate: ratio(renewed.length, eligible.length),
     },
-    average_match_minutes: completed.some((e) => e.match_minutes !== null)
-      ? total(
-          completed
-            .filter((e) => e.match_minutes !== null)
-            .map((e) => e.match_minutes!),
-        ) / completed.filter((e) => e.match_minutes !== null).length
-      : null,
+    average_match_minutes: mean(matchMinutes),
     ltv: null,
-    cac: null,
     notes: [
-      "LTV and CAC remain unavailable without mature retention and acquisition attribution.",
+      "Mature LTV remains unavailable; early payback is a direction signal only.",
       "Metrics reflect imported records; incomplete feeds limit conclusions.",
+      completeThrough
+        ? `Observation coverage is complete through ${completeThrough} (${basis === "configured" ? "configured" : "earliest source coverage"}).`
+        : "No completeness date: configure one or set source coverage dates before reading cohort, renewal or growth figures.",
     ],
   };
 }

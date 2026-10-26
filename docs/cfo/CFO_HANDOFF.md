@@ -53,3 +53,48 @@ Run `npx tsx apps/api/test/export-financial-fixture.ts`, then run it with `JAYE_
 Next management action: enter evidence-backed opening balances, dated funding, separate driver segments and cost schedules; import operational records; resolve exceptions; freeze the original budget. Deployment is authorized; complete it after access to the existing production projects is restored.
 
 Custom-range reproduction: supply `JAYE_QA_START`, `JAYE_QA_END` and a distinct `JAYE_QA_DIR` to the fixture exporter. Pass the resulting directories as comma-separated `JAYE_QA_DATASETS` to the verifier; `JAYE_QA_RENDER=1` also renders previews. Latest local verification artifacts: `/tmp/jaye-range-validation`. This follow-up has not been deployed.
+
+## Investor workspace scoping — 25 October 2026
+
+User requested a detailed implementation prompt, including investor Excel export; no investor feature implementation or publication was requested in this turn. Inspection confirmed `InvestorWorkspace` in `apps/web/app/governance.tsx` is a static placeholder and `GET /api/investor/snapshots` always returns an empty list. Existing immutable financial-model snapshots and formula exports are reusable foundations, not an implemented investor publication workflow.
+
+Proposed scope: preserve UI, add investor reporting from explicitly approved immutable snapshots, scenario/PMF/funding explanations, scoped read-only access, review/publication history and a reconciled, privacy-filtered Excel pack. Separate the custom 1–366-day operating window from any explicitly configured long-term investor-return model. Valuation, ownership, dilution, FX paths and exit assumptions remain unconfirmed; do not derive a meaningful equity IRR from the pilot alone. The $1m raise and annual nominal USD 25% hurdle are historical provisional context, not confirmed funding or promised returns.
+
+Next action: implement the agreed prompt beginning with snapshot permissions and reporting definitions, then shared calculations, dashboard, Excel parity and validation. No code changed or tests rerun for this scope-only review. Custom-period/budget changes were pushed to main as `ce2ad82`; deployment remains unverified.
+
+## Financial reporting expansion — 25 October 2026
+
+Implemented locally as model 1.2.0, reusing the existing calculation engine and interface. Added Performance, Revenue & economics, Cash & funding, Schedules, Review & actions and Reports views. The original scenario controls now include seven independently recalculated operating sensitivities. No investment-return model or automatic tax calculation was introduced.
+
+- Actual/remaining forecast separation; original-budget and latest-forecast comparisons; exact additive EBITDA revision bridge. Different calendars remain non-comparable.
+- Explicit monthly budget-to-cost mappings with unmapped/ambiguous status. These mappings never create ledger expenses. Full-month expense comparisons are withheld for partial-month or mixed-cutoff periods; no arbitrary budget proration.
+- Service revenue/collection/bookings/contribution detail; observed subscription purchases, first purchases, switches, coverage and same-plan renewal. Acquisition economics preserve existing PMF evidence definitions; mature LTV/payback remains unavailable.
+- Cash runway and reserve tests include opening cash. Unrestricted operating burn excludes restricted balances and financing. Committed funding is separate from planned/received statuses but remains forecast cash until receipt confirmation.
+- Existing cost rows support hiring/headcount and operating schedules. Working-capital balances and asset additions/disposals reconcile to existing flows. Actual asset disposal still belongs in accounting; no new forecast-disposal engine.
+- Versioned funding allocations/milestones, budget mappings, tax-policy evidence, CFO actions/commentary and investor-report drafts reuse resource CRUD/history. Funding allocations cannot exceed the parent funding amount. Reviewed tax policies require reviewer, source and evidence, but do not automatically compute taxes or establish legal applicability.
+- Report submission freezes the draft revision, disclosures and snapshot reference in an immutable internal review queue. This is report preparation; the separate investor publication/approval/access project remains unimplemented. No external reports were published.
+- Existing editable management Excel now includes a clearly labelled frozen Management Review appendix (18 sheets total). New six-sheet investor draft is an explicit aggregate allowlist: financial statements, summary, service contribution and pricing, without raw records, free-text names/notes, personal identifiers, payroll detail or credentials. Its totals and summary links use formulas; operating what-if changes belong in the management model/app, not this aggregate investor draft. Downloads retain existing internal financial permissions; investor users cannot fetch drafts.
+
+Verification: 155 tests passed, API/web type checks and optimized build passed. New tests cover mapping ambiguity/cutoffs, allocation caps/restore, persistence, snapshot submission/retry/immutability, permissions/entity isolation, actual-price preservation in sensitivities and investor export privacy across 1-day/366-day windows. Independent artifact-tool recalculation matched all three scenarios and edited volume/price/quantity for the management workbook; investor statement totals, summary links and balance check reconciled with no formula errors. All six investor sheets and the management appendix were rendered and inspected. Local browser checked panels/forms and 390px width without saving test records into the user's database.
+
+Exact next action: open Financial Model, record dated costs/funding and evidence, map departmental budgets in Performance, save a snapshot in Exports, then prepare and submit a draft in Reports. Export either the editable management workbook or the aggregate investor draft from that snapshot. This expansion is not committed, pushed or deployed.
+
+## Investor PMF view — 26 October 2026
+
+Acting as a prospective investor, the Planning & reports workspace was reviewed for product-market-fit evidence. Finding: integrity was strong but the PMF tab showed period totals only, no driver activity or churn, no funnel, no per-service separation and a permanently null payback. Implemented locally as model 1.3.0 on the existing engine and interface:
+
+- `pmf()` now returns `weekly`, `growth`, `driver_cohorts`, `funnel`, `utilisation`, `payback`, `complete_through` and `complete_through_basis` at top level and per service. Definitions are in `pmf.definitions`. Mature LTV stays null.
+- The Product-market fit tab is an investor one-pager: evidence banner, eight tiles (paying drivers latest week, driver renewal, jobs per paying driver-day, median subscription burden, customer D30, fulfilment, blended contribution per job, driver CAC payback) each with sample and evidence label; weekly chart and table; PMF by service; scorecard; driver and customer cohorts; funnel; utilisation; acquisition and payback; driver economics; definitions.
+- Scorecard metrics added: `driver_d30_active`, `paying_driver_growth_weekly`, `jobs_per_paying_driver_week` (count). Add targets under Scenarios → Thresholds with a source; none are seeded.
+- Removed duplicate panels (Revenue & economics → Acquisition economics; PMF → Service performance · Lagos). Everything else in the workspace is unchanged.
+- Management Excel: new "PMF Weekly" sheet (19 sheets). Investor draft: new "Traction" sheet and PMF evidence rows on Investor Summary (7 sheets), aggregates only.
+
+Verification: full `npm test` suite passes (see MODEL_CHANGELOG.md for the count), API and web type checks pass, optimized web build passes. A stale generated duplicate `apps/web/.next/types/routes.d 2.ts` was deleted to restore the web type check; other untracked `* 2.*` duplicates in `apps/api/src/financial`, `apps/api/test`, `apps/web/app` and `docs/cfo` were left in place and should be reviewed and removed by the user, since they differ from both HEAD and the working copies. No browser QA was run for this change; no records, snapshots or exports were created in a user database.
+
+CRM connection requirements (the adapter contract is unchanged): every `driver`/`customer` registration must carry `campaign_id` matching a `campaign` record with the same `audience`; bookings must be sent as revisions of one `external_id` through `requested` → `accepted` → `completed`/`cancelled`, with `match_minutes` and `job_hours` where known; driver records should carry `available_hours`; the source's `coverage_through` must advance with each successful sync because it now defines completeness when the configured date is blank.
+
+Next action: wire the Jaye CRM to the adapter (or its CSV template) with the fields above, import a first batch, set or let the source coverage date drive completeness, seed the three new scorecard targets with sources, then save a snapshot and export the investor draft. Commit and deploy remain pending user instruction.
+
+## Release verification — 26 October 2026
+
+User authorized pushing the latest financial management and PMF changes to `Jaye-financial-model` and merging into `main`. Release checks passed: 159 tests, API/web type checks and production build. The model version marker is aligned to the documented 1.3.0 release. Local web and API health checks passed. Existing untracked duplicate files ending in ` 2` are excluded from the release. Hosted deployment is not verified by this merge.

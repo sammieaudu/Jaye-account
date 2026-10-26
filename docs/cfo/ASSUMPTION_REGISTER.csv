@@ -12,3 +12,5 @@ CHAUFFEUR,Chauffeur commission,15,percent,eligible completed job,all,NGN,founder
 COURIER,Courier fixed or percentage fee,,NGN or percent,eligible completed job,all,NGN,missing,Founder to configure,,2026-10-25,unknown,Founder,Unconfirmed,Revenue
 OPENING,Opening cash and balances,,NGN,prelaunch,all,NGN,missing,Accountant records required,,2026-10-25,unknown,Finance,Unconfirmed,All statements
 VOLUMES,Acquisition and retention inputs,,drivers and customers,90 days,all,NGN,missing,Operations evidence required,,2026-10-25,unknown,Operations,Unconfirmed,All forecasts
+PAYBACK_MATURITY_DAYS,Average observed days below which early CAC payback is labelled immature,90,days,observed,all,NGN,model definition,CFO judgement (engine.ts pmf payback),2026-10-26,2026-10-26,definition,CFO,Provisional,PMF payback label
+GROWTH_WINDOW_WEEKS,Complete weeks averaged for the weekly paying-driver growth scorecard metric,4,weeks,observed,all,NGN,model definition,CFO judgement (engine.ts pmf growth),2026-10-26,2026-10-26,definition,CFO,Provisional,PMF scorecard

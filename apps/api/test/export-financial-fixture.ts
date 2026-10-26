@@ -2,6 +2,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { defaults, eventSchema, addDays, days } from "../src/financial/types";
 import { calculate, Input } from "../src/financial/engine";
+import { exportInvestorWorkbook } from "../src/financial/investor-workbook";
 import { exportFinancialWorkbook } from "../src/financial/workbook";
 async function main() {
   const input: Input = {
@@ -181,6 +182,12 @@ async function main() {
     `${out}/model.xlsx`,
     Buffer.from(
       await exportFinancialWorkbook(input, "synthetic-validation", "base"),
+    ),
+  );
+  writeFileSync(
+    `${out}/investor.xlsx`,
+    Buffer.from(
+      await exportInvestorWorkbook({ input, result: calculate(input, "base") }),
     ),
   );
   console.log(out);

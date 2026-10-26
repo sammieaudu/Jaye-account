@@ -1,5 +1,6 @@
 // Product-runtime exporter. ExcelJS is a deployable dependency; artifact-tool is
 // used by the verification harness, not required on the production API host.
+import { management } from "./management";
 import ExcelJS from "exceljs";
 import { Input, calculate, Flow } from "./engine";
 import { accounts, addDays, coverageEnd, days, version } from "./types";
@@ -699,6 +700,58 @@ export async function exportFinancialWorkbook(
       r.getCell(out).numFmt = "0.0%";
     }
   }
+  const weekly = sheet("PMF Weekly", [
+    "Week",
+    "From",
+    "To",
+    "Coverage complete",
+    "New drivers",
+    "New customers",
+    "Paying drivers",
+    "Paying driver growth",
+    "Active drivers",
+    "Completed jobs",
+    "Requested bookings",
+    "Fulfilment",
+    "Paying driver-days",
+    "Jobs by paying drivers",
+    "Jobs per paying driver-day",
+    "Gross bookings · NGN",
+    "Campaign spend · NGN",
+  ]);
+  for (const w of base.pmf.weekly as any[]) {
+    const r = weekly.addRow([
+      w.week,
+      w.from,
+      w.to,
+      w.complete ? "Yes" : "No",
+      w.new_drivers,
+      w.new_customers,
+      w.paying_drivers,
+      null,
+      w.active_drivers,
+      w.completed_jobs,
+      w.requested_bookings,
+      null,
+      w.paying_driver_days,
+      w.completed_jobs_by_paying,
+      null,
+      w.gross_bookings / 100,
+      w.campaign_spend / 100,
+    ]);
+    const n = r.number;
+    r.getCell(8).value = {
+      formula:
+        n === 2
+          ? `"n.a."`
+          : `IF(G${n - 1}=0,"n.a.",(G${n}-G${n - 1})/G${n - 1})`,
+    };
+    r.getCell(12).value = { formula: `IF(K${n}=0,"n.a.",J${n}/K${n})` };
+    r.getCell(15).value = { formula: `IF(M${n}=0,"n.a.",N${n}/M${n})` };
+    r.getCell(8).numFmt = "0.0%";
+    r.getCell(12).numFmt = "0.0%";
+    r.getCell(15).numFmt = "0.00";
+  }
   const definitions = sheet("Definitions and Warnings", [
     "Topic",
     "Definition / unresolved input",
@@ -785,6 +838,60 @@ export async function exportFinancialWorkbook(
     if (n > 1) {
       r.height = 35;
       r.getCell(2).alignment = { wrapText: true, vertical: "middle" };
+    }
+  });
+  const report = management(input, base);
+  const detail = sheet("Management Review", [
+    "Frozen snapshot schedule",
+    "Value / reference",
+    "Amount · NGN",
+    "Status / context",
+  ]);
+  detail.addRow([
+    "Basis",
+    "These schedules are frozen evidence from the selected scenario. Workbook what-if edits recalculate the existing financial model, not this review appendix.",
+  ]);
+  detail.addRow([
+    "Runway",
+    report.cash.runway,
+    report.cash.gap / 100,
+    "Required reserve gap including opening cash",
+  ]);
+  for (const b of report.budgets)
+    detail.addRow(["Budget", `${b.period} ${b.name}`, b.budget / 100, b.note]);
+  for (const c of report.costs)
+    detail.addRow([
+      "Cost schedule",
+      c.name,
+      c.cash_paid / 100,
+      `${c.category}; ${c.start_date} to ${c.end_date}`,
+    ]);
+  for (const f of report.funding)
+    detail.addRow(["Funding", f.name, f.amount_minor / 100, f.status]);
+  for (const u of report.uses)
+    detail.addRow([
+      "Use of funds",
+      u.milestone,
+      u.amount_minor / 100,
+      `${u.funding} / ${u.cost}`,
+    ]);
+  for (const a of report.actions)
+    detail.addRow([
+      "CFO action",
+      a.description,
+      null,
+      `${a.owner}; ${a.due_date}; ${a.status}`,
+    ]);
+  detail.columns.forEach((c, i) => {
+    c.width = [28, 65, 24, 65][i];
+  });
+  detail.eachRow((row, n) => {
+    if (n > 1) {
+      row.height = 42;
+      row.eachCell((c) => {
+        c.alignment = { wrapText: true, vertical: "middle" };
+      });
+      row.getCell(3).numFmt = fmt;
     }
   });
   return wb.xlsx.writeBuffer();

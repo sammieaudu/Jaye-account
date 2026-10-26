@@ -1,3 +1,4 @@
+import { exportInvestorWorkbook } from "./financial/investor-workbook";
 import { InvoiceService } from "./invoices";
 import { hostedMode, validateHosting, validServiceKey } from "./hosted";
 import { BookkeepingService } from "./bookkeeping";
@@ -251,6 +252,39 @@ class Api {
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="jaye-financial-model-${id}.xlsx"`,
+    );
+    res.send(Buffer.from(bytes));
+  }
+  @Post("financial/reports/submit") financialReportSubmit(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Body() input: any,
+  ) {
+    return new FinancialService(this.store).submitReport(
+      this.financialActor(req),
+      entity,
+      input,
+    );
+  }
+  @Get("financial/snapshots/:id/investor-excel") async financialInvestorExcel(
+    @Req() req: Request,
+    @Query("entity") entity: string,
+    @Param("id") id: string,
+    @Res() res: Response,
+  ) {
+    const snap = new FinancialService(this.store).snapshotData(
+      this.financialActor(req),
+      entity,
+      id,
+    );
+    const bytes = await exportInvestorWorkbook(snap);
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="jaye-investor-draft-${id}.xlsx"`,
     );
     res.send(Buffer.from(bytes));
   }

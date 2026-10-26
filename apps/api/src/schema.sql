@@ -150,3 +150,7 @@ CREATE TABLE IF NOT EXISTS budget_history(id INTEGER PRIMARY KEY AUTOINCREMENT,e
 CREATE TABLE IF NOT EXISTS budget_requests(entity_id TEXT NOT NULL,request_key TEXT NOT NULL,payload_hash TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(entity_id,request_key));
 CREATE TRIGGER IF NOT EXISTS budget_history_no_update BEFORE UPDATE ON budget_history BEGIN SELECT RAISE(ABORT,'Budget history is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS budget_history_no_delete BEFORE DELETE ON budget_history BEGIN SELECT RAISE(ABORT,'Budget history is immutable'); END;
+
+CREATE TABLE IF NOT EXISTS fm_report_submissions(id TEXT PRIMARY KEY,entity_id TEXT NOT NULL,name TEXT NOT NULL,snapshot_id TEXT NOT NULL,data TEXT NOT NULL,created_at TEXT NOT NULL,actor_id TEXT NOT NULL,status TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS fm_report_submission_immutable BEFORE UPDATE ON fm_report_submissions BEGIN SELECT RAISE(ABORT,'Report submissions are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS fm_report_submission_no_delete BEFORE DELETE ON fm_report_submissions BEGIN SELECT RAISE(ABORT,'Report submissions are immutable'); END;

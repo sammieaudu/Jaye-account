@@ -165,7 +165,7 @@ export const resourceSchemas = {
       date: day,
       amount_minor: money,
       kind: z.enum(["equity", "debt"]),
-      status: z.enum(["planned", "confirmed"]),
+      status: z.enum(["planned", "committed", "confirmed"]),
       reference: note,
       source: note,
     })
@@ -180,16 +180,77 @@ export const resourceSchemas = {
     share: fraction,
     source: note,
   }),
-  threshold: z.object({
+  threshold: z
+    .object({
+      name,
+      metric: z.enum([
+        "customer_d30",
+        "driver_renewal",
+        "fulfilment",
+        "contribution_margin",
+        "driver_d30_active",
+        "paying_driver_growth_weekly",
+        "jobs_per_paying_driver_week",
+      ]),
+      // Rate metrics take a 0–1 share; jobs_per_paying_driver_week is a count.
+      minimum: z.number().min(0).max(1000),
+      minimum_sample: z.number().int().min(1),
+      source: note,
+    })
+    .refine(
+      (v) => v.metric === "jobs_per_paying_driver_week" || v.minimum <= 1,
+      "Rate targets must be between 0 and 1",
+    ),
+  budget_link: z.object({ name, budget_id: name, cost_id: name, source: note }),
+  action_item: z.object({
     name,
-    metric: z.enum([
-      "customer_d30",
-      "driver_renewal",
-      "fulfilment",
-      "contribution_margin",
-    ]),
-    minimum: fraction,
-    minimum_sample: z.number().int().min(1),
+    description: note,
+    owner: note,
+    due_date: day,
+    status: z.enum(["open", "in_progress", "resolved"]),
+    priority: z.enum(["low", "medium", "high"]),
+    evidence: note,
+    source: note,
+  }),
+  tax_policy: z
+    .object({
+      name,
+      treatment: z.enum(["unconfirmed", "applicable", "not_applicable"]),
+      effective_from: day,
+      effective_to: day.nullable(),
+      rate: fraction.nullable(),
+      reviewed: z.boolean(),
+      reviewer: note,
+      evidence: note,
+      source: note,
+      description: note,
+    })
+    .superRefine((v, c) => {
+      if (v.effective_to && v.effective_to < v.effective_from)
+        c.addIssue({ code: "custom", message: "End precedes start" });
+      if (v.reviewed && (!v.reviewer || !v.evidence || !v.source))
+        c.addIssue({
+          code: "custom",
+          message:
+            "Reviewed tax policies require reviewer, evidence and source",
+        });
+    }),
+  funding_use: z.object({
+    name,
+    funding_id: name,
+    cost_id: name,
+    amount_minor: money,
+    milestone: note,
+    owner: note,
+    due_date: day,
+    source: note,
+  }),
+  report_draft: z.object({
+    name,
+    snapshot_id: name,
+    description: note,
+    disclosures: note,
+    audience: z.literal("investor"),
     source: note,
   }),
   mapping: z.object({
@@ -306,7 +367,7 @@ export type Event = z.infer<typeof eventSchema> & {
   imported_at?: string;
   price_snapshot?: any;
 };
-export const version = "1.1.0";
+export const version = "1.3.0";
 export function addDays(d: string, n: number) {
   return new Date(Date.parse(d) + n * 86400000).toISOString().slice(0, 10);
 }

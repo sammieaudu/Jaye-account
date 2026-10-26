@@ -10,5 +10,7 @@
 | Which API/provider and settlement custody arrangement? | Freshness and bank reconciliation | Engineering / Finance | CSV and authenticated adapter interface; no claimed live provider |
 | Tax classification, annual profits, losses, allowances, VAT/WHT applicability and payment dates? | Tax/net income/cash | Nigerian accountant | Visible unresolved status; explicit tax costs can be entered pending a verified full tax pack |
 | Driver segment allocation across vehicle/service/plan? | Capacity and duplicate-count prevention | Operations | Separate segments required; do not enter the same driver pool in multiple assumptions |
+| Will the Jaye CRM feed send campaign IDs on every driver/customer registration, booking status transitions as revisions (requested → accepted → completed/cancelled) with match minutes, driver available hours, and maintain `coverage_through` on its source? | CAC, payback, funnel, utilisation and all coverage-gated PMF figures | Engineering / Marketing | Metrics stay "Not yet measurable" where fields are absent; nothing is inferred |
+| Scorecard targets for driver D30 active, weekly paying-driver growth and jobs per paying driver per week? | PMF scorecard assessment | Founder / Operations | No default targets seeded; add under Scenarios with a source |
 
 No further investor-return assumptions are requested for this 90-day mandate.

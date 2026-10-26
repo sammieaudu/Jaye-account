@@ -1,3 +1,8 @@
+import {
+  management,
+  sensitivities as operatingSensitivities,
+  compareSnapshots,
+} from "./management";
 import { createHash, randomUUID } from "node:crypto";
 import { parse } from "csv-parse/sync";
 import { z } from "zod";
@@ -12,7 +17,7 @@ import {
   accounts,
   day,
 } from "./types";
-import { calculate, Input } from "./engine";
+import { calculate, Input, rateMetrics } from "./engine";
 import { SubscriptionService } from "../subscriptions";
 import { addDays, monthAfter } from "./types";
 
@@ -146,6 +151,30 @@ export class FinancialService {
       if (p.service_id !== data.service_id)
         throw new DomainError("Price must belong to the selected service");
     }
+    if (kind === "budget_link") {
+      must(data.cost_id, "cost");
+      if (
+        !this.s.get(
+          "SELECT id FROM budgets WHERE entity_id=? AND id=?",
+          entity,
+          data.budget_id,
+        )
+      )
+        throw new DomainError("Unknown budget in this entity");
+    }
+    if (kind === "funding_use") {
+      must(data.cost_id, "cost");
+      must(data.funding_id, "funding");
+    }
+    if (
+      kind === "report_draft" &&
+      !this.s.get(
+        "SELECT id FROM fm_snapshots WHERE entity_id=? AND id=?",
+        entity,
+        data.snapshot_id,
+      )
+    )
+      throw new DomainError("Choose a saved snapshot");
     if (kind === "config") {
       const sum = Object.values(data.opening).reduce(
         (n: any, x: any) => n + x,
@@ -211,6 +240,48 @@ export class FinancialService {
         throw new DomainError(
           "This scenario already has a driver segment for this price. Edit that segment or use a distinct plan to avoid double counting.",
         );
+      if (
+        v.kind === "budget_link" &&
+        this.resources(entity).some(
+          (r) =>
+            !r.archived &&
+            r.id !== id &&
+            r.kind === "budget_link" &&
+            r.data.budget_id === data.budget_id &&
+            r.data.cost_id === data.cost_id,
+        )
+      )
+        throw new DomainError("This budget/cost mapping already exists");
+      if (
+        v.kind === "funding" &&
+        this.resources(entity)
+          .filter(
+            (r) =>
+              !r.archived &&
+              r.kind === "funding_use" &&
+              r.data.funding_id === id,
+          )
+          .reduce((n, r) => n + r.data.amount_minor, 0) > data.amount_minor
+      )
+        throw new DomainError(
+          "Reduce funding allocations before reducing this funding plan",
+        );
+      if (v.kind === "funding_use") {
+        const others = this.resources(entity)
+          .filter(
+            (r) =>
+              !r.archived &&
+              r.id !== id &&
+              r.kind === "funding_use" &&
+              r.data.funding_id === data.funding_id,
+          )
+          .reduce((n, r) => n + r.data.amount_minor, 0);
+        const funding = this.resources(entity).find(
+          (r) => r.id === data.funding_id,
+        )!;
+        if (others + data.amount_minor > funding.data.amount_minor)
+          throw new DomainError("Allocations exceed the funding amount");
+      }
       if (v.kind === "allocation") {
         const other = this.resources(entity)
           .filter(
@@ -290,6 +361,46 @@ export class FinancialService {
         ).length <= 1
       )
         throw new DomainError("Keep at least one active scenario.");
+      if (
+        ["budget_link", "funding_use"].includes(row.kind) &&
+        v.action === "clone"
+      )
+        throw new DomainError(
+          "Create a new validated mapping or allocation instead of cloning this record",
+        );
+      if (
+        v.action === "restore" &&
+        ["budget_link", "funding_use"].includes(row.kind)
+      ) {
+        const data = JSON.parse(row.data);
+        this.refs(entity, row.kind as Kind, data);
+        const others = this.resources(entity).filter(
+          (r) => !r.archived && r.id !== id,
+        );
+        if (
+          row.kind === "budget_link" &&
+          others.some(
+            (r) =>
+              r.kind === "budget_link" &&
+              r.data.budget_id === data.budget_id &&
+              r.data.cost_id === data.cost_id,
+          )
+        )
+          throw new DomainError("An active mapping already exists");
+        if (
+          row.kind === "funding_use" &&
+          others
+            .filter(
+              (r) =>
+                r.kind === "funding_use" &&
+                r.data.funding_id === data.funding_id,
+            )
+            .reduce((n, r) => n + r.data.amount_minor, 0) +
+            data.amount_minor >
+            others.find((r) => r.id === data.funding_id)!.data.amount_minor
+        )
+          throw new DomainError("Allocations exceed the funding amount");
+      }
       if (v.action === "clone") {
         if (row.kind === "assumption")
           throw new DomainError(
@@ -422,6 +533,7 @@ export class FinancialService {
       .filter((r) => r.amount_minor > 0);
     return {
       resources,
+      budgets: this.s.budgetsRaw(entity, true),
       vendorCosts,
       obligations,
       events: this.s
@@ -535,6 +647,25 @@ export class FinancialService {
             ).length;
             observed = result.pmf.fulfilment;
           }
+          if (r.data.metric === "driver_d30_active") {
+            const c = result.pmf.driver_cohorts as any[];
+            sample = c.reduce((n, x) => n + x.d30.eligible, 0);
+            observed = sample
+              ? c.reduce((n, x) => n + x.d30.active, 0) / sample
+              : null;
+          }
+          if (r.data.metric === "paying_driver_growth_weekly") {
+            sample = result.pmf.growth.weeks_used;
+            observed = result.pmf.growth.paying_driver_growth_weekly;
+          }
+          if (r.data.metric === "jobs_per_paying_driver_week") {
+            const u = result.pmf.utilisation;
+            sample = u.paying_driver_days;
+            observed =
+              u.jobs_per_paying_driver_day === null
+                ? null
+                : u.jobs_per_paying_driver_day * 7;
+          }
           if (r.data.metric === "contribution_margin") {
             const actual = result.daily.filter((d) => d.status === "actual");
             const revenue = actual.reduce((n, d) => n + d.revenue, 0);
@@ -547,6 +678,7 @@ export class FinancialService {
           return {
             name: r.data.name,
             metric: r.data.metric,
+            unit: rateMetrics.includes(r.data.metric) ? "rate" : "count",
             target: r.data.minimum,
             sample,
             observed,
@@ -558,7 +690,31 @@ export class FinancialService {
                   : "Below target",
           };
         });
+      const previous = this.s.get(
+        "SELECT id,name,result_json FROM fm_snapshots WHERE entity_id=? AND kind='forecast' AND scenario_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1",
+        entity,
+        scenario,
+      );
       return {
+        budget_choices: (input.budgets || []).filter((b) => !b.archived),
+        management: management(input, result),
+        operating_sensitivities: operatingSensitivities(input, scenario),
+        revision_comparison: previous
+          ? {
+              id: previous.id,
+              name: previous.name,
+              ...compareSnapshots(JSON.parse(previous.result_json), result),
+            }
+          : null,
+        budget_comparison: originalResult
+          ? compareSnapshots(originalResult, result)
+          : null,
+        report_submissions: this.s
+          .all(
+            "SELECT id,name,snapshot_id,created_at,actor_id,data FROM fm_report_submissions WHERE entity_id=? ORDER BY created_at DESC",
+            entity,
+          )
+          .map((r) => ({ ...r, data: JSON.parse(r.data) })),
         resources: input.resources,
         result,
         comparison,
@@ -1022,6 +1178,55 @@ export class FinancialService {
       input_json: undefined,
       result_json: undefined,
     };
+  }
+  submitReport(a: Actor, entity: string, input: any) {
+    this.access(a, entity, true);
+    const v = validated(
+      z.object({
+        id: z.string(),
+        revision: z.number().int(),
+        request_key: z.string(),
+      }),
+      input,
+    );
+    return this.request(
+      entity,
+      v.request_key,
+      { ...v, operation: "submit_report" },
+      () => {
+        const draft = this.resources(entity).find(
+          (r) => r.id === v.id && r.kind === "report_draft" && !r.archived,
+        );
+        if (!draft || draft.revision !== v.revision)
+          throw new DomainError(
+            "Reload the report draft before submitting",
+            409,
+          );
+        const snap = this.snapshotData(a, entity, draft.data.snapshot_id);
+        const id = randomUUID();
+        this.s.run(
+          "INSERT INTO fm_report_submissions VALUES(?,?,?,?,?,?,?,?)",
+          id,
+          entity,
+          draft.data.name,
+          snap.id,
+          JSON.stringify({
+            ...draft.data,
+            draft_revision: draft.revision,
+            model_version: snap.result.version,
+          }),
+          now(),
+          a.id,
+          "submitted",
+        );
+        this.s.audit(entity, a, "financial.report_submitted", id, {
+          snapshot: snap.id,
+          draft: draft.id,
+          revision: draft.revision,
+        });
+        return { id, status: "submitted" };
+      },
+    );
   }
   history(a: Actor, entity: string, id: string) {
     this.access(a, entity);

@@ -1,5 +1,24 @@
 # Model changelog
 
+## 1.3.0 — investor PMF view, weekly momentum and CRM-ready evidence
+
+- Extended the shared `pmf()` engine (top level and per service) with weekly momentum (new/paying/active drivers, completed jobs, requested bookings, fulfilment, paid driver-days, jobs per paying driver-day, week-over-week paying-driver growth), driver cohorts by registration month (paid conversion, D30/D60 active), a booking funnel (requested, accepted, completed, cancelled, acceptance and completion rates, median match minutes), driver utilisation (jobs per paying and per active driver-day, hours, median subscription burden, paying drivers with no jobs) and early CAC payback per audience labelled unavailable / immature (< 90 observed days) / observed. Mature LTV stays unavailable.
+- The completeness date now falls back to the earliest `coverage_through` across active operational sources when the configured value is blank; `pmf.complete_through` and its basis are reported and the incomplete-actuals warning uses the same rule.
+- Added scorecard metrics `driver_d30_active`, `paying_driver_growth_weekly` (average of the last four complete weeks) and `jobs_per_paying_driver_week` (a count target; rate targets stay 0–1 and are validated). Scorecard rows carry a `unit`.
+- Rebuilt the Product-market fit tab as an investor view: evidence banner, eight tiles with sample sizes and evidence labels, weekly momentum chart and table, PMF by service (contribution per job beside fulfilment, repeat, D30, renewal and utilisation), scorecard, driver and customer cohorts, demand funnel, utilisation, acquisition and payback, driver economics, definitions.
+- Removed duplicates: the "Service performance · Lagos" table (merged into PMF by service) and the "Acquisition economics" panel under Revenue & economics (now only in the PMF tab, with payback). The unused `management.acquisition` payload field was dropped.
+- Management Excel gains a "PMF Weekly" sheet with formula growth, fulfilment and jobs-per-driver-day columns (19 sheets). The aggregate investor draft gains a "Traction" sheet and PMF evidence rows on Investor Summary (7 sheets); no identifiers are exported.
+- Tests: 4 new (weekly/cohorts/funnel/utilisation, payback, completeness fallback, count/rate scorecard validation); investor sheet count updated. Full suite (159 tests), API/web type checks and the optimized web build pass. Local changes only; not committed or deployed.
+
+## 1.2.0 — financial management views and investor draft export
+
+- Reused shared engine results for actual/forecast reporting, budget/forecast comparisons, EBITDA bridge, service economics, subscription activity, working capital, payroll/cost schedules and asset rollforward.
+- Added budget mappings, funding allocation/milestone records, tax-policy evidence, CFO actions and report drafts using existing resource persistence/history. Immutable internal report submissions preserve exact disclosures and snapshot references.
+- Added committed funding and opening-cash reserve checks, plus seven one-driver sensitivities that preserve historical price terms.
+- Extended management Excel with a frozen review appendix and added an aggregate investor draft export with formula totals, privacy allowlist and internal-only authorization. No investor publication or statutory tax automation.
+- 155 tests, type checks and optimized build pass. Independent Excel recalculation and render review pass; 390px browser check showed no document overflow.
+- Local changes only. See CFO_HANDOFF.md for scope and operating limitations.
+
 ## 1.1.0 — custom periods and editable monthly budgets
 
 - Replaced the fixed 90-day calculation/export window with validated inclusive start/end dates (1–366 days); existing configurations keep their original 90-day default. Added a date selector and 90-day preset within the existing interface.

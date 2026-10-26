@@ -3005,6 +3005,7 @@ code {
 .financial-model .fm-metric { padding: 20px; display: grid; gap: 12px; text-align: left; color: var(--ink); }
 .financial-model .fm-metric strong { font-size: 23px; font-weight: 650; overflow-wrap: anywhere; }
 .financial-model .fm-metric small, .financial-model .fm-id { color: var(--muted); font-size: 12px; }
+.financial-model .fm-metric .fm-tag { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
 .financial-model .fm-id { display: block; max-width: 220px; overflow-wrap: anywhere; }
 .financial-model .fm-chart { height: 280px; width: 100%; }
 .financial-model .fm-warning { background: #fff8e9; border: 1px solid #eed9ac; border-radius: 8px; padding: 14px 18px; color: #705522; }

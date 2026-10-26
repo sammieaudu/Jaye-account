@@ -25,6 +25,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
+import { FinancialManagement } from "./financial-management";
 type Row = Record<string, any>;
 const money = (v: number | null | undefined) =>
   v == null
@@ -36,6 +37,85 @@ const money = (v: number | null | undefined) =>
       }).format(v / 100);
 const percent = (v: number | null) =>
   v == null ? "Not yet measurable" : `${(v * 100).toFixed(1)}%`;
+const num = (v: number | null | undefined, digits = 1) =>
+  v == null ? "Not yet measurable" : v.toFixed(digits);
+const sumCohorts = (cohorts: Row[], window: string, hit: string) => {
+  const eligible = cohorts.reduce((n, c) => n + c[window].eligible, 0),
+    hits = cohorts.reduce((n, c) => n + c[window][hit], 0);
+  return { eligible, hits, rate: eligible ? hits / eligible : null };
+};
+// Eight investor tiles: value, sample and evidence label for each.
+function pmfTiles(r: Row, m: Row | undefined) {
+  const p = r.pmf,
+    latest = p.weekly.at(-1),
+    d30 = sumCohorts(p.cohorts, "d30", "retained"),
+    services: Row[] = m?.services || [],
+    jobs = services.reduce((n, s) => n + s.actual_jobs, 0),
+    contribution = jobs
+      ? services.reduce(
+          (n, s) => n + (s.actual_contribution_per_job ?? 0) * s.actual_jobs,
+          0,
+        ) / jobs
+      : null,
+    pay = p.payback.driver,
+    coverage = (ok: boolean) =>
+      ok ? "Complete coverage" : "Coverage incomplete";
+  return [
+    {
+      title: "Paying drivers · latest week",
+      value: latest ? String(latest.paying_drivers) : "No observed weeks",
+      sample: latest
+        ? `Week ${latest.week} · ${percent(latest.paying_driver_growth)} vs prior week`
+        : "Period has no actual days yet",
+      evidence: latest ? coverage(latest.complete) : "Unavailable",
+    },
+    {
+      title: "Driver renewal",
+      value: percent(p.renewal.rate),
+      sample: `${p.renewal.renewed} of ${p.renewal.eligible} eligible plans`,
+      evidence: p.renewal.eligible ? "Complete periods only" : "No eligible plans",
+    },
+    {
+      title: "Jobs per paying driver-day",
+      value: num(p.utilisation.jobs_per_paying_driver_day, 2),
+      sample: `${p.utilisation.paying_driver_days} paid driver-days · ${p.utilisation.paying_drivers_without_jobs} paying with no job`,
+      evidence: "Observed records",
+    },
+    {
+      title: "Subscription burden · median",
+      value: percent(p.utilisation.subscription_burden_median),
+      sample: "Subscription cost / earnings after commission",
+      evidence: "Paying drivers with earnings",
+    },
+    {
+      title: "Customer D30 retention",
+      value: percent(d30.rate),
+      sample: `${d30.hits} of ${d30.eligible} eligible customers`,
+      evidence: coverage(!!p.complete_through),
+    },
+    {
+      title: "Booking fulfilment",
+      value: percent(p.fulfilment),
+      sample: `${p.completed_jobs} of ${p.funnel.bookings} bookings · acceptance ${percent(p.funnel.acceptance_rate)}`,
+      evidence: "Latest booking status",
+    },
+    {
+      title: "Contribution per job · blended",
+      value: money(contribution),
+      sample: `${jobs} actual jobs in the selected period`,
+      evidence: "Posted ledger and imported jobs",
+    },
+    {
+      title: "Driver CAC payback",
+      value:
+        pay.payback_months === null
+          ? "Not yet measurable"
+          : `${pay.payback_months.toFixed(1)} months`,
+      sample: `CAC ${money(p.acquisition.driver.cac)} · ${pay.attributed} attributed drivers`,
+      evidence: label(pay.maturity),
+    },
+  ];
+}
 const label = (s: string) =>
   s
     .replace(/_minor$/, " (NGN)")
@@ -50,6 +130,12 @@ const tabs = [
   "Product-market fit",
   "Data & reconciliation",
   "Exports",
+  "Performance",
+  "Revenue & economics",
+  "Cash & funding",
+  "Schedules",
+  "Review & actions",
+  "Reports",
 ];
 const accountNames = [
   "cash",
@@ -146,13 +232,19 @@ const enums: Record<string, string[]> = {
   ],
   cadence: ["once", "monthly"],
   kind: ["equity", "debt"],
-  status: ["planned", "confirmed"],
+  status: ["planned", "committed", "confirmed"],
   metric: [
     "customer_d30",
     "driver_renewal",
     "fulfilment",
     "contribution_margin",
+    "driver_d30_active",
+    "paying_driver_growth_weekly",
+    "jobs_per_paying_driver_week",
   ],
+  priority: ["low", "medium", "high"],
+  treatment: ["unconfirmed", "applicable", "not_applicable"],
+  audience: ["investor"],
   method: ["csv", "api"],
   model_account: accountNames,
 };
@@ -261,6 +353,43 @@ function fresh(kind: string, start: string, scenario: string): Row {
       metric: "customer_d30",
       minimum: 0,
       minimum_sample: 30,
+    },
+    budget_link: { ...shared, budget_id: "", cost_id: "" },
+    funding_use: {
+      ...shared,
+      funding_id: "",
+      cost_id: "",
+      amount_minor: 0,
+      milestone: "",
+      owner: "",
+      due_date: start,
+    },
+    action_item: {
+      ...shared,
+      description: "",
+      owner: "",
+      due_date: start,
+      status: "open",
+      priority: "medium",
+      evidence: "",
+    },
+    tax_policy: {
+      ...shared,
+      treatment: "unconfirmed",
+      effective_from: start,
+      effective_to: null,
+      rate: null,
+      reviewed: false,
+      reviewer: "",
+      evidence: "",
+      description: "",
+    },
+    report_draft: {
+      ...shared,
+      snapshot_id: "",
+      description: "",
+      disclosures: "",
+      audience: "investor",
     },
     mapping: { ...shared, source_account: "", model_account: "overhead" },
     source: {
@@ -484,12 +613,14 @@ export default function FinancialModel({
       <div className="panel-heading">
         <div>
           <h2>
-            {kind === "funding"
-              ? "Funding plans"
-              : label(kind) +
-                (kind === "assumption"
-                  ? "s · independent driver segments"
-                  : "s")}
+            {kind === "tax_policy"
+              ? "Tax policies"
+              : kind === "funding"
+                ? "Funding plans"
+                : label(kind) +
+                  (kind === "assumption"
+                    ? "s · independent driver segments"
+                    : "s")}
           </h2>
           <p>
             {kind === "assumption"
@@ -554,7 +685,9 @@ export default function FinancialModel({
                   <Pencil size={15} />
                   <span className="sr-only">Edit {row.data.name}</span>
                 </button>
-                {kind !== "assumption" && (
+                {!["assumption", "budget_link", "funding_use"].includes(
+                  kind,
+                ) && (
                   <button
                     title="Clone"
                     onClick={() =>
@@ -639,6 +772,8 @@ export default function FinancialModel({
         service_id: "service",
         scenario_id: "scenario",
         price_id: "price",
+        cost_id: "cost",
+        funding_id: "funding",
       } as Row
     )[key];
     let choices = refKind
@@ -652,12 +787,28 @@ export default function FinancialModel({
           )
           .map((x) => ({ value: x.id, name: x.data.name }))
       : undefined;
+    if (key === "budget_id")
+      choices = (data!.budget_choices || []).map((x: Row) => ({
+        value: x.id,
+        name: `${x.period} · ${x.department} · ${x.category}`,
+      }));
+    if (key === "snapshot_id")
+      choices = data!.snapshots.map((x: Row) => ({
+        value: x.id,
+        name: `${x.name} · ${x.created_at}`,
+      }));
     const options =
-      key === "status" && editor!.kind === "source"
-        ? ["unconfigured", "healthy", "failed"]
-        : enums[key];
+      key === "status" && editor!.kind === "action_item"
+        ? ["open", "in_progress", "resolved"]
+        : key === "status" && editor!.kind === "source"
+          ? ["unconfigured", "healthy", "failed"]
+          : enums[key];
     if (options) choices = options.map((x) => ({ value: x, name: label(x) }));
-    const title = fractions.includes(key) ? `${label(key)} (%)` : label(key);
+    const countTarget =
+      key === "minimum" &&
+      editor!.data.metric === "jobs_per_paying_driver_week";
+    const title =
+      fractions.includes(key) && !countTarget ? `${label(key)} (%)` : label(key);
     if (typeof value === "boolean")
       return (
         <label key={key} className="fm-check">
@@ -710,6 +861,9 @@ export default function FinancialModel({
         "eligibility",
         "refund_policy",
         "tax_note",
+        "evidence",
+        "disclosures",
+        "milestone",
       ].includes(key)
     )
       return (
@@ -724,7 +878,7 @@ export default function FinancialModel({
       );
     const isNumber = numeric.includes(key),
       isMoney = key.endsWith("_minor"),
-      fraction = fractions.includes(key),
+      fraction = fractions.includes(key) && !countTarget,
       isDate =
         key.includes("date") ||
         [
@@ -796,7 +950,7 @@ export default function FinancialModel({
           <h2>Lagos · financial model</h2>
           <p>
             {r.start} – {r.end} · {r.daily.length} days · Actual cutoff{" "}
-            {r.cutoff} · NGN
+            {r.cutoff} · NGN · Model {r.version}
           </p>
         </div>
         <div className="action-buttons">
@@ -1038,6 +1192,19 @@ export default function FinancialModel({
           </button>
         ))}
       </div>
+      {tabs.indexOf(tab) >= 8 && (
+        <FinancialManagement
+          data={data}
+          section={tab}
+          resourceTable={resourceTable}
+          busy={busy}
+          onSubmit={(row) =>
+            safe(() =>
+              mutate("reports/submit", { id: row.id, revision: row.revision }),
+            )
+          }
+        />
+      )}
       {tab === tabs[0] && (
         <>
           <div className="fm-metrics">
@@ -1140,6 +1307,13 @@ export default function FinancialModel({
           {resourceTable("assumption")}
           {resourceTable("allocation")}
           {resourceTable("threshold")}
+          <FinancialManagement
+            data={data}
+            section="Sensitivity"
+            resourceTable={resourceTable}
+            busy={busy}
+            onSubmit={() => {}}
+          />
           <section className="panel fm-panel">
             <h2>Funding sensitivity · {scenario}</h2>
             <p>
@@ -1334,111 +1508,299 @@ export default function FinancialModel({
       )}
       {tab === tabs[5] && (
         <>
+          <section
+            className={
+              r.pmf.complete_through ? "panel fm-panel" : "fm-warning"
+            }
+          >
+            <p>
+              Observed records through <strong>{r.cutoff}</strong>. Coverage
+              complete through{" "}
+              <strong>{r.pmf.complete_through || "not set"}</strong>
+              {r.pmf.complete_through_basis === "source_coverage"
+                ? " (earliest source coverage date)"
+                : r.pmf.complete_through_basis === "configured"
+                  ? " (configured)"
+                  : ". Set a source coverage date or the configured completeness date before reading cohort, renewal or growth figures."}
+              {" · "}Registered drivers {r.pmf.drivers} · Paying drivers{" "}
+              {r.pmf.paying_drivers} · Customers completing a job{" "}
+              {r.pmf.customers}
+            </p>
+          </section>
           <div className="fm-metrics">
-            {[
-              ["Customer repeat rate", percent(r.pmf.repeat)],
-              ["Booking fulfilment", percent(r.pmf.fulfilment)],
-              ["Eligible driver renewal", percent(r.pmf.renewal.rate)],
-              ["Completed jobs", r.pmf.completed_jobs],
-            ].map(([title, value]) => (
-              <section className="panel fm-metric" key={title}>
-                <span>{title}</span>
-                <strong>{value}</strong>
+            {pmfTiles(r, data.management).map((t) => (
+              <section className="panel fm-metric" key={t.title}>
+                <span>{t.title}</span>
+                <strong>{t.value}</strong>
+                <small>{t.sample}</small>
+                <small className="fm-tag">{t.evidence}</small>
               </section>
             ))}
           </div>
           <section className="panel fm-panel">
-            <h2>Customer retention cohorts</h2>
+            <h2>Weekly momentum</h2>
             <p>
-              Trailing seven-day return window ending at D7/D30/D60. Only
-              cohorts with complete observation coverage qualify.
+              Week 1 starts on {r.start}. Paying drivers hold paid coverage
+              during the week; active drivers completed at least one job.
+            </p>
+            {r.pmf.weekly.length > 1 && (
+              <div className="fm-chart">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={r.pmf.weekly}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis
+                      dataKey="week"
+                      tickFormatter={(v) => `W${v}`}
+                    />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip labelFormatter={(v) => `Week ${v}`} />
+                    <Line
+                      type="monotone"
+                      dataKey="paying_drivers"
+                      name="Paying drivers"
+                      stroke="#2b7661"
+                      strokeWidth={2}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="active_drivers"
+                      name="Active drivers"
+                      stroke="#8a6d1f"
+                      strokeWidth={2}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="completed_jobs"
+                      name="Completed jobs"
+                      stroke="#4b5b9e"
+                      strokeWidth={2}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            <DataTable
+              headers={[
+                "Week",
+                "Dates",
+                "New drivers",
+                "Paying drivers",
+                "Growth",
+                "Active drivers",
+                "Completed jobs",
+                "Fulfilment",
+                "Jobs / paying driver-day",
+                "Gross bookings",
+                "Coverage",
+              ]}
+              rows={r.pmf.weekly.map((w: Row) => [
+                `W${w.week}`,
+                `${w.from} to ${w.to}`,
+                w.new_drivers,
+                w.paying_drivers,
+                percent(w.paying_driver_growth),
+                w.active_drivers,
+                w.completed_jobs,
+                percent(w.fulfilment),
+                num(w.jobs_per_paying_driver_day, 2),
+                money(w.gross_bookings),
+                w.complete ? "Complete" : "Incomplete",
+              ])}
+            />
+          </section>
+          <section className="panel fm-panel">
+            <h2>PMF by service</h2>
+            <p>
+              Observed actuals only. Contribution per job comes from the
+              management ledger view; retention and renewal from imported
+              records.
             </p>
             <DataTable
               headers={[
-                "First-completion cohort",
-                "Customers",
-                "D7 retained / eligible",
-                "D7",
-                "D30 retained / eligible",
-                "D30",
-                "D60 retained / eligible",
-                "D60",
-              ]}
-              rows={r.pmf.cohorts.map((x: Row) => [
-                x.month,
-                x.sample,
-                `${x.d7.retained} / ${x.d7.eligible}`,
-                percent(x.d7.rate),
-                `${x.d30.retained} / ${x.d30.eligible}`,
-                percent(x.d30.rate),
-                `${x.d60.retained} / ${x.d60.eligible}`,
-                percent(x.d60.rate),
-              ])}
-            />
-          </section>
-          <section className="panel fm-panel">
-            <h2>Service performance · Lagos</h2>
-            <DataTable
-              headers={[
                 "Service",
-                "Revenue",
-                "Direct contribution",
-                "Allocated costs",
-                "Contribution after allocation",
+                "Paying drivers",
+                "Completed jobs",
+                "Contribution / job",
                 "Fulfilment",
-                "Repeat rate",
+                "Repeat",
+                "Customer D30",
+                "Driver renewal",
+                "Jobs / paying driver-day",
               ]}
-              rows={r.services.map((x: Row) => [
-                x.name,
-                money(x.revenue),
-                money(x.gross_profit),
-                money(x.allocated_overhead),
-                money(x.contribution_after_allocation),
-                percent(x.metrics.fulfilment),
-                percent(x.metrics.repeat),
-              ])}
+              rows={r.services.map((x: Row) => {
+                const m = (data.management?.services || []).find(
+                  (s: Row) => s.id === x.id,
+                );
+                const d30 = sumCohorts(x.metrics.cohorts, "d30", "retained");
+                return [
+                  x.name,
+                  x.metrics.paying_drivers,
+                  x.metrics.completed_jobs,
+                  money(m?.actual_contribution_per_job ?? null),
+                  percent(x.metrics.fulfilment),
+                  percent(x.metrics.repeat),
+                  `${percent(d30.rate)} (${d30.eligible})`,
+                  `${percent(x.metrics.renewal.rate)} (${x.metrics.renewal.eligible})`,
+                  num(x.metrics.utilisation.jobs_per_paying_driver_day, 2),
+                ];
+              })}
             />
           </section>
           <section className="panel fm-panel">
-            <h2>Management targets</h2>
+            <h2>PMF scorecard</h2>
             <p>
               Targets are configurable planning judgments, not a certification
-              of product-market fit.
+              of product-market fit. Edit them under Scenarios.
             </p>
             <DataTable
               headers={["Metric", "Target", "Observed", "Sample", "Assessment"]}
               rows={data.thresholds.map((x: Row) => [
                 x.name,
-                percent(x.target),
-                percent(x.observed),
+                x.unit === "count" ? num(x.target, 1) : percent(x.target),
+                x.unit === "count" ? num(x.observed, 2) : percent(x.observed),
                 x.sample,
                 x.status,
               ])}
             />
           </section>
+          <div className="fm-grid">
+            <section className="panel fm-panel">
+              <h2>Driver cohorts</h2>
+              <p>
+                By first registration month. Active means a completed job or
+                paid coverage around D30/D60.
+              </p>
+              <DataTable
+                headers={[
+                  "Cohort",
+                  "Registered",
+                  "Paid",
+                  "D30 active / eligible",
+                  "D60 active / eligible",
+                ]}
+                rows={r.pmf.driver_cohorts.map((x: Row) => [
+                  x.month,
+                  x.registered,
+                  `${x.paid} (${percent(x.paid_rate)})`,
+                  `${x.d30.active} / ${x.d30.eligible} · ${percent(x.d30.rate)}`,
+                  `${x.d60.active} / ${x.d60.eligible} · ${percent(x.d60.rate)}`,
+                ])}
+              />
+            </section>
+            <section className="panel fm-panel">
+              <h2>Customer cohorts</h2>
+              <p>
+                By first completed job month. Trailing seven-day return window
+                ending at D7/D30/D60.
+              </p>
+              <DataTable
+                headers={["Cohort", "Customers", "D7", "D30", "D60"]}
+                rows={r.pmf.cohorts.map((x: Row) => [
+                  x.month,
+                  x.sample,
+                  `${x.d7.retained} / ${x.d7.eligible} · ${percent(x.d7.rate)}`,
+                  `${x.d30.retained} / ${x.d30.eligible} · ${percent(x.d30.rate)}`,
+                  `${x.d60.retained} / ${x.d60.eligible} · ${percent(x.d60.rate)}`,
+                ])}
+              />
+            </section>
+          </div>
+          <div className="fm-grid">
+            <section className="panel fm-panel">
+              <h2>Demand funnel</h2>
+              <DataTable
+                headers={["Stage", "Value"]}
+                rows={[
+                  ["Bookings recorded", r.pmf.funnel.bookings],
+                  ["Still requested", r.pmf.funnel.still_requested],
+                  ["Accepted, not completed", r.pmf.funnel.accepted_not_completed],
+                  ["Completed", r.pmf.funnel.completed],
+                  ["Cancelled", r.pmf.funnel.cancelled],
+                  ["Acceptance rate", percent(r.pmf.funnel.acceptance_rate)],
+                  ["Completion rate", percent(r.pmf.funnel.completion_rate)],
+                  [
+                    "Median match minutes",
+                    `${num(r.pmf.funnel.median_match_minutes, 1)} (${r.pmf.funnel.matched_sample} matched)`,
+                  ],
+                  [
+                    "Days from registration to first job",
+                    num(r.pmf.time_to_first_completion_days, 1),
+                  ],
+                ]}
+              />
+            </section>
+            <section className="panel fm-panel">
+              <h2>Driver utilisation</h2>
+              <DataTable
+                headers={["Measure", "Value"]}
+                rows={[
+                  ["Paid driver-days", r.pmf.utilisation.paying_driver_days],
+                  [
+                    "Jobs per paying driver-day",
+                    num(r.pmf.utilisation.jobs_per_paying_driver_day, 2),
+                  ],
+                  [
+                    "Jobs per active driver-day",
+                    num(r.pmf.utilisation.jobs_per_active_driver_day, 2),
+                  ],
+                  [
+                    "Paying drivers with no completed job",
+                    r.pmf.utilisation.paying_drivers_without_jobs,
+                  ],
+                  [
+                    "Average hours per job",
+                    num(r.pmf.utilisation.average_job_hours, 1),
+                  ],
+                  [
+                    "Average hours available",
+                    num(r.pmf.utilisation.average_available_hours, 1),
+                  ],
+                  [
+                    "Subscription burden (median)",
+                    percent(r.pmf.utilisation.subscription_burden_median),
+                  ],
+                  ["Paid conversion", percent(r.pmf.activation.paid_conversion)],
+                ]}
+              />
+            </section>
+          </div>
           <section className="panel fm-panel">
-            <h2>Acquisition economics</h2>
+            <h2>Acquisition and early payback</h2>
+            <p>
+              CAC needs campaign IDs on registrations. Payback compares CAC
+              with observed monthly platform revenue per attributed acquisition
+              and stays labelled immature below 90 observed days. Mature LTV is
+              not reported.
+            </p>
             <DataTable
               headers={[
                 "Audience",
-                "Attributed acquisitions",
-                "Campaign spending",
+                "Campaign spend",
+                "Attributed",
                 "CAC",
+                "Observed revenue",
+                "Monthly revenue / acquisition",
+                "Payback",
+                "Maturity",
               ]}
               rows={Object.entries(r.pmf.acquisition).map(
-                ([audience, x]: any) => [
-                  label(audience),
-                  x.attributed_acquisitions,
-                  money(x.spend),
-                  money(x.cac),
-                ],
+                ([audience, x]: any) => {
+                  const p = r.pmf.payback[audience];
+                  return [
+                    label(audience),
+                    money(x.spend),
+                    x.attributed_acquisitions,
+                    money(x.cac),
+                    money(p.observed_revenue),
+                    money(p.monthly_revenue_per_acquisition),
+                    p.payback_months === null
+                      ? "Not yet measurable"
+                      : `${p.payback_months.toFixed(1)} months`,
+                    `${label(p.maturity)}${p.average_observed_days === null ? "" : ` · ${num(p.average_observed_days, 0)} days observed`}`,
+                  ];
+                },
               )}
             />
-            <p>
-              CAC requires linked campaign IDs and audience attribution.
-              Observed payback and LTV remain unavailable without complete
-              attributable contribution history.
-            </p>
           </section>
           <section className="panel fm-panel">
             <h2>Driver economics</h2>
@@ -1451,14 +1813,16 @@ export default function FinancialModel({
                 "Driver",
                 "Completed jobs",
                 "Covered days",
+                "Jobs / covered day",
                 "Subscription cost",
-                "Gross earnings less platform fees",
+                "Earnings less platform fees",
                 "Subscription burden",
               ]}
               rows={r.pmf.driver_economics.map((x: Row) => [
                 x.driver_id,
                 x.jobs,
                 x.coverage_days,
+                num(x.jobs_per_covered_day, 2),
                 money(x.subscription_cost),
                 money(x.earnings_before_vehicle_costs),
                 percent(x.subscription_burden),
@@ -1478,11 +1842,6 @@ export default function FinancialModel({
               ))}
             </dl>
             <p>{r.pmf.notes.join(" ")}</p>
-            <p>
-              Registered drivers: {r.pmf.drivers} · Paying drivers:{" "}
-              {r.pmf.paying_drivers} · Customers completing a job:{" "}
-              {r.pmf.customers}
-            </p>
           </section>
         </>
       )}
@@ -1857,7 +2216,9 @@ export default function FinancialModel({
           <p>
             Freeze a reproducible snapshot, then download the editable Excel
             model. Blue workbook inputs recalculate forecasts; workbook changes
-            do not update this app.
+            do not update this app. Investor downloads are aggregate, frozen
+            drafts for review; internal records are excluded. Management detail
+            schedules remain frozen alongside the editable model.
           </p>
           {canWrite && (
             <form
@@ -1898,7 +2259,14 @@ export default function FinancialModel({
             </form>
           )}
           <DataTable
-            headers={["Name", "Type", "Scenario", "Saved", "Download"]}
+            headers={[
+              "Name",
+              "Type",
+              "Scenario",
+              "Saved",
+              "Management Excel",
+              "Investor Excel",
+            ]}
             rows={data.snapshots.map((x: Row) => [
               x.name,
               x.kind,
@@ -1911,6 +2279,13 @@ export default function FinancialModel({
               >
                 <Download size={15} />
                 Excel model
+              </a>,
+              <a
+                key="investor"
+                href={`/api${endpoint(`snapshots/${x.id}/investor-excel`)}`}
+                download
+              >
+                <Download size={15} /> Investor draft · aggregate only
               </a>,
             ])}
           />

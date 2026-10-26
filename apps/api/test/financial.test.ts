@@ -806,3 +806,192 @@ test("custom-range workbook rows, monthly totals and final balances cover the se
     );
   }
 });
+function pmfFixture() {
+  const i = pure();
+  i.resources[0].data.cutoff = "2026-12-31";
+  i.resources[0].data.operating_data_complete_through = "2026-12-31";
+  const sub = (date: string, coverage_end: string) =>
+    event({
+      type: "subscription",
+      status: "paid",
+      date,
+      coverage_end,
+      driver_id: "d1",
+      customer_id: "",
+      service_id: "car",
+      price_id: "car-month",
+      amount_minor: 2000000,
+    });
+  i.events = [
+    event({
+      type: "campaign",
+      status: "active",
+      date: "2026-11-28",
+      external_id: "camp1",
+      audience: "driver",
+      amount_minor: 500000,
+      driver_id: "",
+      customer_id: "",
+      service_id: "",
+      price_id: "",
+    }),
+    event({
+      type: "driver",
+      status: "registered",
+      date: "2026-11-28",
+      driver_id: "d1",
+      customer_id: "",
+      campaign_id: "camp1",
+      available_hours: 8,
+      amount_minor: 0,
+    }),
+    event({
+      type: "driver",
+      status: "registered",
+      date: "2026-12-03",
+      driver_id: "d2",
+      customer_id: "",
+      amount_minor: 0,
+    }),
+    sub("2026-12-01", "2026-12-31"),
+    sub("2026-12-31", "2027-01-30"),
+    event({ date: "2026-12-02", driver_id: "d1", match_minutes: 4 }),
+    event({ date: "2026-12-09", driver_id: "d1", match_minutes: 6 }),
+    event({ date: "2026-12-16", driver_id: "d1" }),
+    event({ date: "2026-12-10", driver_id: "d1", status: "requested" }),
+    event({ date: "2026-12-11", driver_id: "d1", status: "cancelled" }),
+  ];
+  return i;
+}
+test("weekly momentum, driver cohorts, funnel and utilisation derive from observed records only", () => {
+  const p = calculate(pmfFixture()).pmf;
+  assert.equal(p.weekly.length, 5);
+  assert.deepEqual(
+    p.weekly.map((w: any) => [w.paying_drivers, w.completed_jobs, w.new_drivers]),
+    [
+      [1, 1, 1],
+      [1, 1, 0],
+      [1, 1, 0],
+      [1, 0, 0],
+      [1, 0, 0],
+    ],
+  );
+  assert.equal(p.weekly[0].paying_driver_growth, null);
+  assert.equal(p.weekly[1].paying_driver_growth, 0);
+  assert.equal(p.weekly[1].requested_bookings, 3);
+  assert.equal(p.weekly[1].fulfilment, 1 / 3);
+  assert.equal(p.weekly[4].paying_driver_days, 3);
+  assert.equal(p.growth.weeks_used, 4);
+  assert.equal(p.growth.paying_driver_growth_weekly, 0);
+  assert.equal(p.growth.latest_paying_drivers, 1);
+  assert.deepEqual(
+    p.driver_cohorts.map((c: any) => [c.month, c.registered, c.paid, c.d30]),
+    [
+      ["2026-11", 1, 1, { eligible: 1, active: 1, rate: 1 }],
+      ["2026-12", 1, 0, { eligible: 0, active: 0, rate: null }],
+    ],
+  );
+  assert.equal(p.funnel.bookings, 5);
+  assert.equal(p.funnel.acceptance_rate, 3 / 5);
+  assert.equal(p.funnel.completion_rate, 3 / 5);
+  assert.equal(p.funnel.median_match_minutes, 5);
+  assert.equal(p.utilisation.paying_driver_days, 31);
+  assert.equal(p.utilisation.jobs_per_paying_driver_day, 3 / 31);
+  assert.equal(p.utilisation.average_available_hours, 8);
+  assert.equal(p.utilisation.paying_drivers_without_jobs, 0);
+  assert.deepEqual(p.renewal, { eligible: 1, renewed: 1, rate: 1 });
+});
+test("early payback uses attributed revenue per observed day and stays labelled immature", () => {
+  const p = calculate(pmfFixture()).pmf;
+  assert.equal(p.acquisition.driver.cac, 500000);
+  const d = p.payback.driver;
+  assert.equal(d.attributed, 1);
+  assert.equal(d.observed_revenue, 4000000);
+  assert.equal(d.average_observed_days, 34);
+  assert.ok(Math.abs(d.payback_months - 500000 / ((4000000 * 30.4) / 34)) < 1e-9);
+  assert.equal(d.maturity, "immature");
+  assert.equal(p.payback.customer.maturity, "unavailable");
+  assert.equal(p.payback.customer.payback_months, null);
+});
+test("completeness falls back to the earliest source coverage date and gates weekly and cohort maturity", () => {
+  const i = pmfFixture();
+  i.resources[0].data.operating_data_complete_through = null;
+  let p = calculate(i).pmf;
+  assert.equal(p.complete_through, null);
+  assert.equal(p.complete_through_basis, "unset");
+  assert.equal(p.renewal.eligible, 0);
+  assert.equal(p.growth.weeks_used, 0);
+  i.resources.push(
+    resource("src-a", "source", {
+      name: "CRM",
+      method: "api",
+      coverage_through: "2026-12-20",
+      status: "healthy",
+      cursor: "",
+      source: "test",
+    }),
+    resource("src-b", "source", {
+      name: "Payments",
+      method: "csv",
+      coverage_through: "2026-12-31",
+      status: "healthy",
+      cursor: "",
+      source: "test",
+    }),
+  );
+  p = calculate(i).pmf;
+  assert.equal(p.complete_through, "2026-12-20");
+  assert.equal(p.complete_through_basis, "source_coverage");
+  assert.deepEqual(
+    p.weekly.map((w: any) => w.complete),
+    [true, true, false, false, false],
+  );
+  assert.equal(p.renewal.eligible, 0);
+  assert.equal(p.driver_cohorts[0].d30.eligible, 0);
+  assert.equal(p.growth.weeks_used, 1);
+});
+test("scorecard supports count and growth targets and rejects rate targets above one", (t) => {
+  const { f, a, save } = fixture(t);
+  save("threshold", {
+    name: "Jobs per paying driver per week",
+    metric: "jobs_per_paying_driver_week",
+    minimum: 5,
+    minimum_sample: 1,
+    source: "test",
+  });
+  save("threshold", {
+    name: "Weekly paying-driver growth",
+    metric: "paying_driver_growth_weekly",
+    minimum: 0.1,
+    minimum_sample: 4,
+    source: "test",
+  });
+  save("threshold", {
+    name: "Driver D30 active",
+    metric: "driver_d30_active",
+    minimum: 0.5,
+    minimum_sample: 10,
+    source: "test",
+  });
+  assert.throws(() =>
+    save("threshold", {
+      name: "Bad rate",
+      metric: "fulfilment",
+      minimum: 2,
+      minimum_sample: 1,
+      source: "test",
+    }),
+  );
+  const rows = f.workspace(a, "ng").thresholds;
+  const jobs = rows.find((x: any) => x.metric === "jobs_per_paying_driver_week");
+  assert.equal(jobs.unit, "count");
+  assert.equal(jobs.status, "Insufficient evidence");
+  assert.equal(
+    rows.find((x: any) => x.metric === "paying_driver_growth_weekly").unit,
+    "rate",
+  );
+  assert.equal(
+    rows.find((x: any) => x.metric === "driver_d30_active").sample,
+    0,
+  );
+});
